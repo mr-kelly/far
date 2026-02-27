@@ -7,7 +7,8 @@ import time
 from pathlib import Path
 
 # Add the skill directory to path to import far_gen
-sys.path.append(str(Path(__file__).parent))
+skill_dir = Path(__file__).parent.parent / "skills" / "far"
+sys.path.insert(0, str(skill_dir))
 import far_gen
 
 class TestFarGenCache(unittest.TestCase):

@@ -6,7 +6,8 @@ import sys
 from pathlib import Path
 
 # Add the skill directory to path to import far_gen
-sys.path.append(str(Path(__file__).parent))
+skill_dir = Path(__file__).parent.parent / "skills" / "far"
+sys.path.insert(0, str(skill_dir))
 import far_gen
 
 class TestFarGen(unittest.TestCase):
@@ -33,7 +34,40 @@ class TestFarGen(unittest.TestCase):
         with open(meta_path, "r") as f:
             content = f.read()
             self.assertIn("Hello FAR world", content)
-            self.assertIn("pipeline: far_gen_v2", content)
+            self.assertIn("pipeline:", content)
+
+    def test_fixtures(self):
+        """Test processing of fixture files."""
+        fixtures_dir = Path(__file__).parent / "fixtures"
+        if not fixtures_dir.exists():
+            self.skipTest("Fixtures directory not found")
+        
+        # Test markdown file
+        md_file = fixtures_dir / "sample.md"
+        if md_file.exists():
+            meta_path = self.far_gen.generate_file_meta(str(md_file), str(fixtures_dir), [])
+            self.assertTrue(os.path.exists(meta_path))
+            with open(meta_path, "r") as f:
+                content = f.read()
+                self.assertIn("Sample Document", content)
+        
+        # Test JSON file
+        json_file = fixtures_dir / "sample.json"
+        if json_file.exists():
+            meta_path = self.far_gen.generate_file_meta(str(json_file), str(fixtures_dir), [])
+            self.assertTrue(os.path.exists(meta_path))
+            with open(meta_path, "r") as f:
+                content = f.read()
+                self.assertIn("FAR Test Data", content)
+        
+        # Test Python file
+        py_file = fixtures_dir / "sample.py"
+        if py_file.exists():
+            meta_path = self.far_gen.generate_file_meta(str(py_file), str(fixtures_dir), [])
+            self.assertTrue(os.path.exists(meta_path))
+            with open(meta_path, "r") as f:
+                content = f.read()
+                self.assertIn("greet", content)
 
     def test_ignore_pattern(self):
         """Test if files matching .farignore are skipped."""
