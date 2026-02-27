@@ -126,7 +126,7 @@ project/
 | 📦 Tar | `.tar`, `.tar.gz`, `.tgz`, `.bz2`, `.xz` | Built-in | File listing with sizes |
 | 📧 Email | `.eml`, `.msg` | Built-in | Headers + body + attachment list |
 | 📝 RTF | `.rtf` | Built-in | Plain text extraction |
-| 🗄️ SQLite | `.db`, `.sqlite`, `.sqlite3` | Built-in | Table schemas + row counts *(metadata only)* |
+| 🗄️ SQLite | `.db`, `.sqlite`, `.sqlite3` | Built-in | Table schemas + latest 20 rows per table |
 | 📊 Parquet | `.parquet` | pyarrow (optional) | Schema + row count *(metadata only)* |
 | 🎨 Design | `.fig`, `.sketch`, `.xd` | Built-in | File size + page count *(metadata only)* |
 | 💻 Code | `.py`, `.js`, `.ts`, `.go`, `.rs`, `.java`, `.sh`, ... | Direct mirror | Full content |

@@ -566,25 +566,39 @@ def extract_rtf(filepath):
 
 
 def extract_sqlite(filepath):
-    """[Metadata only] Extract table names, schemas, and row counts from SQLite."""
+    """Extract table schemas and recent rows from SQLite (up to 20 rows per table)."""
+    MAX_ROWS = 20
     try:
         import sqlite3
         con = sqlite3.connect(filepath)
         cur = con.cursor()
         cur.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
         tables = [r[0] for r in cur.fetchall()]
-        parts = [f"## SQLite Database\n\n**Tables:** {len(tables)}\n"]
+        parts = [f"## SQLite Database\n\n**Tables:** {len(tables)}"]
         for table in tables:
             try:
                 cur.execute(f"PRAGMA table_info(`{table}`)")
-                cols = [f"`{r[1]}` {r[2]}" for r in cur.fetchall()]
+                col_info = cur.fetchall()
+                cols = [r[1] for r in col_info]
+                col_types = [f"`{r[1]}` {r[2]}" for r in col_info]
                 cur.execute(f"SELECT COUNT(*) FROM `{table}`")
                 count = cur.fetchone()[0]
-                parts.append(f"### {table} ({count:,} rows)\n" + ", ".join(cols))
-            except Exception:
-                parts.append(f"### {table} (error reading schema)")
+                parts.append(f"### {table} ({count:,} rows)\n**Schema:** " + ", ".join(col_types))
+                # Fetch most recent rows by rowid desc
+                cur.execute(f"SELECT * FROM `{table}` ORDER BY rowid DESC LIMIT {MAX_ROWS}")
+                rows = cur.fetchall()
+                if rows:
+                    header = "| " + " | ".join(cols) + " |"
+                    sep = "| " + " | ".join(["---"] * len(cols)) + " |"
+                    lines = [header, sep]
+                    for row in reversed(rows):  # show oldest-first within the sample
+                        lines.append("| " + " | ".join(str(v) if v is not None else "" for v in row) + " |")
+                    parts.append("\n".join(lines))
+                    if count > MAX_ROWS:
+                        parts.append(f"*({count:,} rows total, showing latest {MAX_ROWS})*")
+            except Exception as ex:
+                parts.append(f"### {table} (error: {ex})")
         con.close()
-        parts.append("\n> [Metadata only] — row content not extracted.")
         return "\n\n".join(parts)
     except Exception as e:
         return f"[Error extracting SQLite: {e}]"

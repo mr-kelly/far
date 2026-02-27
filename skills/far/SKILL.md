@@ -57,7 +57,7 @@ FAR extracts text and structure from a wide range of formats:
 *   **📦 Tar** (`.tar`, `.tar.gz`, `.tgz`, `.bz2`, `.xz`): File listing with sizes.
 *   **📧 Email** (`.eml`, `.msg`): Headers, body text, and attachment list.
 *   **📝 RTF** (`.rtf`): Plain text extraction via control word stripping.
-*   **🗄️ SQLite** (`.db`, `.sqlite`, `.sqlite3`): Table schemas and row counts. *[Metadata only]*
+*   **🗄️ SQLite** (`.db`, `.sqlite`, `.sqlite3`): Table schemas + latest 20 rows per table as Markdown tables.
 *   **📊 Parquet** (`.parquet`): Schema and row count via `pyarrow` (optional). *[Metadata only]*
 *   **🎨 Design** (`.fig`, `.sketch`, `.xd`): File size and page/canvas count. *[Metadata only]*
 *   **💻 Code/Text** (`.py`, `.js`, `.ts`, `.go`, `.rs`, `.md`, `.json`, ...): Direct content mirroring.
