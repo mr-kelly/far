@@ -11,7 +11,7 @@ user-invocable: true
 
 FAR is a file augmentation protocol that generates persistent `.meta` sidecar files for binary documents (PDF, DOCX, XLSX, PPTX, Images, etc.). This allows AI coding agents (like OpenClaw, Cursor, GitHub Copilot) to "read" non-text files directly from the file system without requiring external RAG infrastructure.
 
-**Current Version:** 0.5.0
+**Current Version:** 0.6.0
 **Author:** Kelly Peilin Chan
 
 ---
@@ -45,13 +45,15 @@ The agent simply reads `budget.xlsx.meta` to understand the spreadsheet. No vect
 
 ### 1. Broad Format Support
 FAR extracts text and structure from a wide range of formats:
-*   **📄 PDF** (`.pdf`): Full text extraction with layout preservation. **OCR fallback** for scanned PDFs.
+*   **📄 PDF** (`.pdf`): Full text extraction with layout preservation. **OCR fallback** for scanned PDFs. **Embedded image extraction** (pdfimages + OCR/Vision).
 *   **📝 Word** (`.docx`, `.doc`): Text extraction.
 *   **📊 Excel** (`.xlsx`): Sheet data converted to Markdown tables.
 *   **📽️ PowerPoint** (`.pptx`): Slide text extraction.
-*   **🖼️ Images** (`.png`, `.jpg`): **OCR** (Tesseract) + **AI Vision** (GPT-4o) if configured.
-*   **🎬 Media** (`.mp4`, `.mov`, `.mp3`): Technical metadata (FFprobe) + **AI Transcription** (Whisper) if configured.
-*   **💻 Code/Text** (`.py`, `.md`, `.json`): Direct content mirroring.
+*   **🖼️ Images** (`.png`, `.jpg`, `.jpeg`, `.gif`, `.bmp`, `.webp`): **OCR** (Tesseract) + **AI Vision** (GPT-4o) if configured.
+*   **🎬 Media** (`.mp4`, `.mov`, `.mp3`, `.wav`, `.m4a`, `.flac`): Technical metadata (FFprobe) + **AI Transcription** (Whisper) if configured.
+*   **📋 CSV** (`.csv`): Data rendered as Markdown tables (up to 100 rows).
+*   **📓 Jupyter Notebook** (`.ipynb`): Markdown cells, code cells, and outputs.
+*   **💻 Code/Text** (`.py`, `.js`, `.ts`, `.go`, `.rs`, `.md`, `.json`, ...): Direct content mirroring.
 
 ### 2. Intelligent Caching (Incremental Build)
 FAR is designed for speed. It uses a **two-layer caching mechanism**:

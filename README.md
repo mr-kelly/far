@@ -5,7 +5,7 @@
 **Making Every File Readable to AI Coding Agents**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.5.0-blue.svg)](https://github.com/mr-kelly/far)
+[![Version](https://img.shields.io/badge/version-0.6.0-blue.svg)](https://github.com/mr-kelly/far)
 
 [📖 Read the Paper](https://mr-kelly.github.io/research/File-Augmented%20Retrieval%20-%20Making%20Every%20File%20Readable%20to%20Coding%20Agents%20via%20Persistent%20.meta%20Sidecars.pdf) • [🚀 Quick Start](#-quick-start) • [✨ Features](#-features)
 
@@ -119,6 +119,8 @@ project/
 | 🖼️ Images | `.png`, `.jpg`, `.jpeg`, `.gif`, `.bmp`, `.webp` | Tesseract OCR + GPT-4V | Caption + OCR text |
 | 🎬 Video | `.mp4`, `.mov`, `.avi`, `.mkv` | ffmpeg + Whisper | Metadata + transcript |
 | 🎵 Audio | `.mp3`, `.wav`, `.m4a`, `.flac` | Whisper | Transcript |
+| 📋 CSV | `.csv` | Built-in | Markdown table (up to 100 rows) |
+| 📓 Jupyter | `.ipynb` | Built-in | Markdown + code cells + outputs |
 | 💻 Code | `.py`, `.js`, `.ts`, `.go`, `.rs`, `.java`, `.sh`, ... | Direct mirror | Full content |
 | 📋 Text | `.txt`, `.md`, `.json`, `.yml`, `.xml`, `.html`, `.css` | Direct mirror | Full content |
 | 📦 Other | `*` | Fallback | MIME type + file metadata |

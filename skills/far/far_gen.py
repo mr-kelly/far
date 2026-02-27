@@ -16,7 +16,7 @@ from pathlib import Path
 
 # --- Configuration ---
 SKILL_VERSION = "0.6.0"
-PIPELINE_ID = "far_gen_v6"
+PIPELINE_ID = "far_gen_v7"
 MAX_DIR_SUMMARY_FILES = 50  # Max files to list in .dir.meta summary
 FFMPEG_BIN = "/home/linuxbrew/.linuxbrew/bin/ffmpeg"
 FFPROBE_BIN = "/home/linuxbrew/.linuxbrew/bin/ffprobe"
@@ -197,29 +197,63 @@ def openai_vision(filepath):
 
 def extract_pdf(filepath):
     try:
-        # Check if PDF is image-based (simplified heuristic: no text)
-        subprocess.run(['pdftotext', '-v'], capture_output=True, check=False)
         result = subprocess.run(['pdftotext', '-layout', filepath, '-'], capture_output=True, text=True)
         text = result.stdout
-        
+
         # Heuristic: If very little text, try OCR (local)
-        if len(text.strip()) < 50: 
+        if len(text.strip()) < 50:
             try:
-                # Need pdftoppm (poppler-utils)
-                subprocess.run(['pdftoppm', '-v'], capture_output=True, check=False)
-                # Convert first page to png
                 ppm_proc = subprocess.Popen(['pdftoppm', '-png', '-f', '1', '-l', '1', filepath], stdout=subprocess.PIPE)
-                # Pipe to tesseract
                 tess_proc = subprocess.run(['tesseract', '-', '-', '-l', 'eng+chi_sim'], stdin=ppm_proc.stdout, capture_output=True, text=True)
                 ocr_text = tess_proc.stdout
                 if ocr_text.strip():
-                     return f"{text}\n\n[Local OCR Extraction (Page 1)]:\n{ocr_text}"
+                    text = f"{text}\n\n[Local OCR Extraction (Page 1)]:\n{ocr_text}"
             except FileNotFoundError:
-                pass 
-                
+                pass
+
+        # Extract embedded images from PDF
+        images_text = extract_pdf_images(filepath)
+        if images_text:
+            text = f"{text}\n\n{images_text}"
+
         return text if result.returncode == 0 else f"[Error: {result.stderr}]"
     except FileNotFoundError:
         return "[Error: pdftotext not installed]"
+
+
+def extract_pdf_images(filepath):
+    """Extract and OCR embedded images from a PDF using pdfimages."""
+    try:
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = subprocess.run(
+                ['pdfimages', '-png', filepath, os.path.join(tmpdir, 'img')],
+                capture_output=True
+            )
+            if result.returncode != 0:
+                return ""
+            images = sorted(Path(tmpdir).glob('*.png'))
+            if not images:
+                return ""
+            parts = ["## Embedded Images"]
+            for i, img in enumerate(images[:10], 1):  # cap at 10 images
+                ocr = ""
+                try:
+                    r = subprocess.run(['tesseract', str(img), '-', '-l', 'eng+chi_sim'], capture_output=True, text=True)
+                    if r.returncode == 0 and r.stdout.strip():
+                        ocr = r.stdout.strip()
+                except FileNotFoundError:
+                    pass
+                ai = openai_vision(str(img))
+                if ai or ocr:
+                    parts.append(f"### Image {i}")
+                    if ai:
+                        parts.append(ai)
+                    if ocr:
+                        parts.append(f"[OCR]: {ocr}")
+            return "\n".join(parts) if len(parts) > 1 else ""
+    except FileNotFoundError:
+        return ""  # pdfimages not installed, skip silently
 
 def extract_docx(filepath):
     try:
@@ -315,6 +349,53 @@ def extract_pptx(filepath):
         return "\n".join(text_content)
     except Exception as e:
         return f"[Error extracting PPTX (native mode): {e}]"
+
+
+def extract_csv(filepath):
+    """Extract CSV as a Markdown table."""
+    try:
+        import csv
+        with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+            reader = csv.reader(f)
+            rows = list(reader)
+        if not rows:
+            return "(Empty CSV)"
+        header = rows[0]
+        lines = ["| " + " | ".join(header) + " |",
+                 "| " + " | ".join(["---"] * len(header)) + " |"]
+        for row in rows[1:101]:  # cap at 100 rows
+            lines.append("| " + " | ".join(str(c) for c in row) + " |")
+        if len(rows) > 101:
+            lines.append(f"\n*({len(rows) - 1} rows total, showing first 100)*")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"[Error extracting CSV: {e}]"
+
+
+def extract_ipynb(filepath):
+    """Extract Jupyter Notebook: markdown cells + code cells + outputs."""
+    try:
+        with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+            nb = json.load(f)
+        parts = []
+        for i, cell in enumerate(nb.get('cells', [])):
+            ctype = cell.get('cell_type', '')
+            source = ''.join(cell.get('source', []))
+            if ctype == 'markdown':
+                parts.append(source)
+            elif ctype == 'code':
+                parts.append(f"```python\n{source}\n```")
+                for output in cell.get('outputs', []):
+                    otype = output.get('output_type', '')
+                    if otype in ('stream', 'execute_result', 'display_data'):
+                        text = output.get('text') or output.get('data', {}).get('text/plain', [])
+                        out = ''.join(text) if isinstance(text, list) else str(text)
+                        if out.strip():
+                            parts.append(f"**Output:**\n```\n{out.strip()}\n```")
+        return "\n\n".join(parts)
+    except Exception as e:
+        return f"[Error extracting notebook: {e}]"
+
 
 def extract_media_metadata(filepath):
     """Extract duration and format info using ffprobe."""
@@ -427,6 +508,8 @@ def generate_file_meta(filepath, root_dir, ignore_patterns, force=False):
     elif ext == '.doc': extracted_text = extract_doc(filepath)
     elif ext == '.xlsx': extracted_text = extract_xlsx(filepath)
     elif ext == '.pptx': extracted_text = extract_pptx(filepath)
+    elif ext == '.csv': extracted_text = extract_csv(filepath)
+    elif ext == '.ipynb': extracted_text = extract_ipynb(filepath)
     elif mime_type.startswith('image/'): extracted_text = extract_image_ocr(filepath)
     elif mime_type.startswith('video/') or mime_type.startswith('audio/'): extracted_text = extract_media_metadata(filepath)
     elif mime_type.startswith('text/') or ext in ['.txt', '.md', '.json', '.yml', '.py', '.sh', '.meta', '.js', '.css', '.html', '.xml']:
