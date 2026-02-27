@@ -13,53 +13,109 @@
 
 ---
 
+> *"RAG performs retrieval at query time. FAR performs augmentation at file time."*
+> — [FAR Paper, Kelly Peilin Chan, 2026](https://mr-kelly.github.io/research/File-Augmented%20Retrieval%20-%20Making%20Every%20File%20Readable%20to%20Coding%20Agents%20via%20Persistent%20.meta%20Sidecars.pdf)
+
+---
+
 ## 🎯 The Problem
 
-AI coding agents can read code, but they're **blind to 30-40% of critical context** stored in binary formats:
+AI coding agents (Claude Code, Codex, GitHub Copilot) can read code — but they're **blind to 30–40% of critical context** stored in binary formats:
 
-- 📊 **Spreadsheets** (`budget.xlsx`)
-- 📄 **Documents** (`requirements.docx`)  
-- 🖼️ **Images** (`architecture.png`)
-- 📑 **PDFs** (`contract.pdf`)
+| File | Agent sees |
+|------|-----------|
+| `budget.xlsx` | Opaque bytes |
+| `architecture.png` | Nothing |
+| `requirements.pdf` | Nothing |
+| `standup.mp4` | Nothing |
 
-When an agent encounters these files, it sees opaque bytes. **It cannot reason about the content.**
+> *"An AI agent operating without access to these files is like a developer who can read code but is forbidden from looking at the design docs, the architecture diagrams, or the product requirements."*
 
 ## 💡 The Solution
 
-FAR generates persistent `.meta` sidecar files that make binary documents readable:
+FAR generates a persistent `.meta` sidecar next to every binary file — containing the full extracted content as Markdown:
 
 ```
 project/
-├── budget.xlsx         ← Binary (opaque)
-└── budget.xlsx.meta    ← Markdown (readable by AI)
+├── budget.xlsx           ← Binary (opaque to AI)
+├── budget.xlsx.meta      ← Markdown table (readable by AI)
+├── architecture.png      ← Binary
+├── architecture.png.meta ← Caption + OCR text
+└── standup.mp4.meta      ← Full transcript + topics
 ```
 
-**No vector database. No API calls. No runtime overhead.**  
-Just plain text files that live alongside your documents.
+**No vector database. No embedding service. No runtime pipeline.**
+The agent simply reads the `.meta` file directly from the filesystem.
+
+## 📊 Why Not RAG?
+
+RAG has three structural problems FAR solves:
+
+| | RAG | FAR |
+|---|---|---|
+| Infrastructure | 3+ always-running services | Zero |
+| Content quality | Lossy chunks (~500 tokens) | Complete file |
+| Binary support | Partial | Full |
+| Latency | 200–500ms | <10ms |
+| Offline support | ❌ | ✅ |
+
+**Benchmark on 10,000-file heterogeneous corpus:**
+
+| Method | File Discovery | Cross-file Reasoning |
+|--------|---------------|---------------------|
+| grep | 31.2% | — |
+| RAG (LangChain) | 58.7% | 34.1% |
+| Vector + rerank | 52.1% | 41.3% |
+| **FAR (.meta)** | **82.6%** | **71.9%** |
+
+Storage overhead: only **6.3%** (146 MB on a 2.3 GB corpus, vs 890 MB for RAG).
+
+## 🧠 Inspired by Unity Engine
+
+FAR is inspired by Unity's `.meta` asset pipeline — a 20-year-old insight that every binary asset needs a text sidecar for the engine to understand it. FAR applies the same principle to AI coding agents.
+
+```
+player.png      →   player.png.meta   (Unity: engine metadata)
+report.pdf      →   report.pdf.meta   (FAR: AI-readable content)
+```
 
 ## ✨ Features
 
 ### 📦 Broad Format Support
 
-- **📄 PDF** - Full text extraction + OCR for scanned documents
-- **📝 Word/Excel/PowerPoint** - Text and table extraction  
-- **🖼️ Images** - OCR (Tesseract) + AI Vision (GPT-4o)
-- **🎬 Media** - Metadata + AI Transcription (Whisper)
-- **💻 Code/Text** - Direct content mirroring
+| Format | Extractor | Output |
+|--------|-----------|--------|
+| 📄 PDF | pdfminer + tabula | Full text, tables as Markdown |
+| 🖼️ Images | Tesseract OCR + GPT-4V | Caption + OCR text |
+| 📊 Excel | openpyxl | Sheets as Markdown tables |
+| 📝 Word/PowerPoint | python-docx | Full text |
+| 🎬 Video/Audio | Whisper + ffmpeg | Transcript + topics |
+| 💻 Code/Text | Direct mirror | Full content |
 
 ### ⚡ Intelligent Caching
 
-Two-layer caching for instant incremental builds:
-1. **Fast Check** (mtime & size) - Skip unchanged files in 0.003s
-2. **Content Check** (SHA256) - Detect true changes even if timestamp differs
+Two-layer cache for instant incremental builds:
+1. **Fast check** (mtime + size) — skip unchanged files in 0.003s
+2. **Content check** (SHA-256) — detect true changes even if timestamp differs
+
+On a 10,000-file repo with 50 changed files → only 50 extraction calls.
 
 ### 📁 Directory Summaries
 
-Auto-generated `.dir.meta` files provide high-level overviews, letting agents "browse" folders efficiently.
+Auto-generated `.dir.meta` files let agents "browse" entire directories:
 
-### 🔗 Git LFS Support
+```
+project/.dir.meta       ← "What is this project?"
+  src/.dir.meta         ← "What's in src/?"
+  docs/.dir.meta        ← "What docs exist?"
+```
 
-Automatically handles Git LFS pointer files by pulling real content before processing.
+### 🔒 Privacy & Security
+
+- `.farignore` file (gitignore syntax) to exclude sensitive paths
+- PII redaction rules configurable
+- Encrypted sidecar support (content encrypted, YAML header plaintext)
+- Fully offline — no files leave your machine
 
 ## 🚀 Quick Start
 
@@ -92,9 +148,20 @@ far report.pdf
 far . --force
 ```
 
+### One Rule for Your Agent
+
+Add this to `AGENTS.md` or your system prompt — that's all:
+
+```markdown
+When you encounter a binary file you cannot read
+(.png, .pdf, .xlsx, .mp4), check for a .meta file
+beside it. The .meta contains extracted content as
+Markdown. For directory overviews, read .dir.meta.
+```
+
 ### Configuration
 
-Enable AI features (transcription, vision) by creating `.env`:
+Enable AI features (vision, transcription) by creating `.env`:
 
 ```bash
 cp skills/far/.env.example skills/far/.env
@@ -103,25 +170,56 @@ cp skills/far/.env.example skills/far/.env
 
 Without API keys, FAR gracefully falls back to local tools (Tesseract, FFprobe).
 
+## 📐 The `.meta` Format
+
+Every `.meta` file has a YAML frontmatter header + Markdown body:
+
+```markdown
+---
+far_version: 1
+source:
+  sha256: a1b2c3d4...
+  mime: application/pdf
+  size: 129509
+extract:
+  pipeline: far_gen_v6
+  extracted_at: 2026-02-27T10:00:00Z
+---
+# report.pdf
+
+## Executive Summary
+
+Revenue grew 23% YoY driven by APAC expansion.
+
+## Table 1 - Revenue by Region
+
+| Region       | Q3 2025 | Growth |
+|--------------|---------|--------|
+| Asia-Pacific | $2.3M   | +28%   |
+| N. America   | $1.9M   | +12%   |
+```
+
 ## 📚 Documentation
 
-Full documentation available in [`skills/far/SKILL.md`](skills/far/SKILL.md)
+Full documentation in [`skills/far/SKILL.md`](skills/far/SKILL.md)
 
 ## 📖 Research
 
-FAR is based on the research paper:
+Based on the research paper:
 
 **[File-Augmented Retrieval: Making Every File Readable to Coding Agents via Persistent .meta Sidecars](https://mr-kelly.github.io/research/File-Augmented%20Retrieval%20-%20Making%20Every%20File%20Readable%20to%20Coding%20Agents%20via%20Persistent%20.meta%20Sidecars.pdf)**
 
 *Kelly Peilin Chan, 2026*
 
-## 🤝 Contributing
-
-Contributions welcome! This project follows the standard GitHub flow.
+Key findings:
+- **82.6%** file-discovery accuracy vs 58.7% for RAG
+- **71.9%** cross-file reasoning accuracy vs 34.1% for RAG
+- **6.3%** storage overhead (vs 38.7% for RAG)
+- **Zero** runtime infrastructure required
 
 ## 📄 License
 
-MIT License - see LICENSE file for details
+MIT License
 
 ---
 
