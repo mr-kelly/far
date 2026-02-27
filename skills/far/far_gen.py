@@ -16,7 +16,7 @@ from pathlib import Path
 
 # --- Configuration ---
 SKILL_VERSION = "1.0.0"
-PIPELINE_ID = "far_gen_v11"
+PIPELINE_ID = "far_gen_v12"
 MAX_DIR_SUMMARY_FILES = 50  # Max files to list in .dir.meta summary
 FFMPEG_BIN = "/home/linuxbrew/.linuxbrew/bin/ffmpeg"
 FFPROBE_BIN = "/home/linuxbrew/.linuxbrew/bin/ffprobe"
@@ -456,11 +456,17 @@ def extract_ipynb(filepath):
         return f"[Error extracting notebook: {e}]"
 
 
-def extract_media_metadata(filepath):
-    """Extract duration and format info using ffprobe."""
+def extract_media_metadata(filepath, mime_type):
+    """Extract duration, format info, and process Video/Audio based on FAR_VIDEO_MODE."""
+    mode = os.environ.get("FAR_VIDEO_MODE", "A").upper()
+    if mode == "ALL": mode = "D"
+    
+    parts = []
+    
+    # 1. Base ffprobe metadata
     local_info = ""
+    import shutil
     try:
-        # Check if ffprobe exists
         if not os.path.exists(FFPROBE_BIN) and shutil.which('ffprobe') is None:
              local_info = "[ffprobe not found]"
         else:
@@ -472,12 +478,79 @@ def extract_media_metadata(filepath):
                 local_info = f"Media Info (ffprobe):\n{result.stdout}"
     except Exception as e:
         local_info = f"[Media extraction error: {e}]"
+    parts.append(local_info)
 
-    # AI Enhancement
-    ai_transcript = openai_transcribe(filepath)
-    if ai_transcript:
-        return f"{local_info}\n\n{ai_transcript}"
-    return local_info
+    # 2. Audio Processing (Option B) - Applies to both audio/video files
+    if mode in ["B", "D"] or mime_type.startswith('audio/'):
+        ai_transcript = openai_transcribe(filepath)
+        if ai_transcript:
+            parts.append(f"## Audio Transcript (Option B)\n{ai_transcript}")
+
+    # 3. Video Processing (Option A & C)
+    if mime_type.startswith('video/') and mode in ["A", "C", "D"]:
+        import tempfile
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                # Extract 1 frame per 3 seconds (max 20 frames to avoid hanging)
+                cmd = [FFMPEG_BIN if os.path.exists(FFMPEG_BIN) else 'ffmpeg', '-y', '-i', filepath, '-vf', 'fps=1/3', '-vframes', '20', os.path.join(tmpdir, 'frame_%04d.png')]
+                subprocess.run(cmd, capture_output=True)
+                
+                frames = sorted(Path(tmpdir).glob('*.png'))
+                if frames:
+                    # Option A: Local OCR (Default)
+                    if mode in ["A", "D"]:
+                        ocr_texts = []
+                        seen_lines = set()
+                        for f in frames:
+                            try:
+                                r = subprocess.run(['tesseract', str(f), 'stdout', '-l', 'chi_sim+eng'], capture_output=True, text=True)
+                                if r.returncode == 0:
+                                    text = r.stdout.strip()
+                                    lines = [l.strip() for l in text.split("\n") if len(l.strip()) > 2]
+                                    new_lines = []
+                                    for l in lines:
+                                        if l not in seen_lines:
+                                            seen_lines.add(l)
+                                            new_lines.append(l)
+                                    if new_lines:
+                                        ocr_texts.append("\n".join(new_lines))
+                            except Exception:
+                                pass
+                        if ocr_texts:
+                            parts.append("## Video Frame OCR (Option A)\n" + "\n...\n".join(ocr_texts))
+                    
+                    # Option C: Vision API
+                    if mode in ["C", "D"]:
+                        api_key = get_openai_key()
+                        if api_key:
+                            selected_frames = frames[::max(1, len(frames)//5)][:5] # Up to 5 evenly spaced frames
+                            images_content = []
+                            for f in selected_frames:
+                                with open(f, "rb") as image_file:
+                                    base64_image = base64.b64encode(image_file.read()).decode('utf-8')
+                                images_content.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64_image}"}})
+                                
+                            try:
+                                headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
+                                payload = {
+                                    "model": OPENAI_MODEL_IMAGE,
+                                    "messages": [{"role": "user", "content": [{"type": "text", "text": "Describe the sequence of events and any text visible in these video frames."}] + images_content}],
+                                    "max_tokens": 1000
+                                }
+                                import urllib.request
+                                import json
+                                req = urllib.request.Request(f"{get_openai_base()}/chat/completions", data=json.dumps(payload).encode('utf-8'), headers=headers)
+                                with urllib.request.urlopen(req) as response:
+                                    res = json.load(response)
+                                    content_vision = res['choices'][0]['message']['content']
+                                    parts.append(f"## AI Vision Summary (Option C)\n{content_vision}")
+                            except Exception as e:
+                                parts.append(f"[AI Vision Error: {e}]")
+        except Exception as e:
+            parts.append(f"[Video frame processing error: {e}]")
+
+    return "\n\n".join(parts)
+
     
 def extract_image_ocr(filepath):
     """Extract text from image using tesseract (local) + AI Vision (optional)."""
@@ -787,7 +860,7 @@ def generate_file_meta(filepath, root_dir, ignore_patterns, force=False):
     elif ext == '.parquet': extracted_text = extract_parquet(filepath)
     elif ext in ('.fig', '.sketch', '.xd'): extracted_text = extract_design_metadata(filepath)
     elif mime_type.startswith('image/'): extracted_text = extract_image_ocr(filepath)
-    elif mime_type.startswith('video/') or mime_type.startswith('audio/'): extracted_text = extract_media_metadata(filepath)
+    elif mime_type.startswith('video/') or mime_type.startswith('audio/'): extracted_text = extract_media_metadata(filepath, mime_type)
     elif mime_type.startswith('text/') or ext in ['.txt', '.md', '.json', '.yml', '.py', '.sh', '.meta', '.js', '.css', '.html', '.xml']:
         try:
             with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
