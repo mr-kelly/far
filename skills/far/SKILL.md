@@ -11,7 +11,7 @@ user-invocable: true
 
 FAR is a file augmentation protocol that generates persistent `.meta` sidecar files for binary documents (PDF, DOCX, XLSX, PPTX, Images, etc.). This allows AI coding agents (like OpenClaw, Cursor, GitHub Copilot) to "read" non-text files directly from the file system without requiring external RAG infrastructure.
 
-**Current Version:** 0.9.0
+**Current Version:** 1.0.0
 **Author:** Kelly Peilin Chan
 
 ---
@@ -133,6 +133,28 @@ secrets/
 
 ---
 
+## 🤖 Agent Integration
+
+Add one rule to `AGENTS.md` or your system prompt:
+
+```
+## File Reading with FAR
+
+When navigating a directory, first read `.dir.meta` for a high-level overview
+before opening individual files.
+
+When you encounter a binary file you cannot read directly
+(.png, .pdf, .xlsx, .mp4, .fig, .db, etc.), check for a .meta file
+beside it — it contains the extracted content as Markdown.
+
+Navigation strategy:
+1. Read <dir>/.dir.meta to understand directory structure
+2. Read <file>.meta to access binary file content
+3. Fall back to reading the source file only if no .meta exists
+```
+
+---
+
 ## 🏗️ Protocol Specification (v1)
 
 Each `.meta` file follows a strict format with a YAML frontmatter header and Markdown body.
@@ -145,28 +167,39 @@ source:
   size: 129509
   mtime: 1708845210.5
 extract:
-  pipeline: far_gen_v5
-  extracted_at: 2026-02-25T16:35:18Z
+  pipeline: far_gen_v11
+  extracted_at: 2026-02-27T10:00:00Z
+  deterministic: true
+layout:
+  pages: 24
 ---
 # filename.pdf
 
 [Extracted Content Here...]
 ```
 
+Cache invalidation: a `.meta` is stale if `sha256` or `pipeline` version has changed.
+
 ---
 
 ## 🤝 Contributing
 
-This skill is part of the **OpenClaw Agent Ecosystem**.
-Location: `~/.openclaw/workspace/.agents/skills/far/`
-
 **Roadmap:**
-- [x] PDF/Word/Excel Support
-- [x] PowerPoint Support
-- [x] Incremental Caching (mtime)
-- [x] Directory Summaries
+- [x] PDF/Word/Excel/PowerPoint Support
+- [x] Incremental Caching (SHA-256 + mtime)
+- [x] Directory Summaries (`.dir.meta`)
 - [x] OCR for Images/Scanned PDFs (Tesseract)
-- [x] Media Metadata (FFprobe)
-- [x] Audio/Video Transcription (Whisper)
+- [x] Media Metadata (FFprobe) + Transcription (Whisper)
 - [x] AI Vision for Images (GPT-4o)
-- [ ] Rust Implementation for CI/CD speed
+- [x] PDF Embedded Image Extraction
+- [x] CSV → Markdown Tables
+- [x] Jupyter Notebook Support
+- [x] EPUB, ZIP/TAR, Email, RTF
+- [x] SQLite Schema + Data Preview
+- [x] Parquet Schema, Design File Metadata
+- [x] Pipeline version stale detection
+- [x] Layout frontmatter (pages/sheets/slides)
+- [x] Full glob support in `.farignore`
+- [ ] MCP resource server integration
+- [ ] PII redaction rules
+- [ ] Rust implementation for CI/CD speed

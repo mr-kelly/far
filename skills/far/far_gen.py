@@ -15,8 +15,8 @@ import base64
 from pathlib import Path
 
 # --- Configuration ---
-SKILL_VERSION = "0.9.0"
-PIPELINE_ID = "far_gen_v10"
+SKILL_VERSION = "1.0.0"
+PIPELINE_ID = "far_gen_v11"
 MAX_DIR_SUMMARY_FILES = 50  # Max files to list in .dir.meta summary
 FFMPEG_BIN = "/home/linuxbrew/.linuxbrew/bin/ffmpeg"
 FFPROBE_BIN = "/home/linuxbrew/.linuxbrew/bin/ffprobe"
@@ -669,11 +669,21 @@ def load_farignore(root_dir):
     return ignore_patterns
 
 def should_ignore(path, root_dir, ignore_patterns):
-    rel_path = os.path.relpath(path, root_dir)
+    import fnmatch
+    rel_path = os.path.relpath(path, root_dir).replace(os.sep, '/')
+    parts = rel_path.split('/')
     for pattern in ignore_patterns:
-        if pattern in rel_path.split(os.sep): return True
-        if pattern.endswith('*') and pattern[:-1] in rel_path: return True
-        if pattern.startswith('*') and rel_path.endswith(pattern[1:]): return True
+        p = pattern.rstrip('/')
+        # Match any path component
+        if p in parts:
+            return True
+        # Full glob match
+        if fnmatch.fnmatch(rel_path, pattern) or fnmatch.fnmatch(rel_path, pattern.rstrip('/') + '/*'):
+            return True
+        # Match each component
+        for part in parts:
+            if fnmatch.fnmatch(part, p):
+                return True
     return False
 
 # --- Generators ---
@@ -698,33 +708,74 @@ def generate_file_meta(filepath, root_dir, ignore_patterns, force=False):
         try:
             with open(meta_path, 'r', encoding='utf-8') as f:
                 content = f.read()
-                has_mtime = f"mtime: {current_mtime}" in content
-                has_size = f"size: {current_size}" in content
-                has_pipeline = f"pipeline: {PIPELINE_ID}" in content
-                
-                if has_mtime and has_size and has_pipeline:
-                    return meta_path 
-        except Exception: 
+            if (f"mtime: {current_mtime}" in content
+                    and f"size: {current_size}" in content
+                    and f"pipeline: {PIPELINE_ID}" in content):
+                return meta_path
+        except Exception:
             pass
 
-    # 2. Slow Check: SHA256 (if mtime changed or force=True)
+    # 2. Slow Check: SHA256 (if mtime/size/pipeline changed)
     current_hash = get_sha256(filepath)
-    if not current_hash: 
+    if not current_hash:
         log(f"Error: Cannot hash {filepath}", "ERROR")
         return None
+
+    # Check SHA256 even if mtime changed (content may be same)
+    if not force and meta_path.exists():
+        try:
+            with open(meta_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            if (f"sha256: {current_hash}" in content
+                    and f"pipeline: {PIPELINE_ID}" in content):
+                # Content unchanged, just update mtime in meta
+                updated = content.replace(
+                    next(l for l in content.splitlines() if l.strip().startswith('mtime:')),
+                    f"  mtime: {current_mtime}"
+                )
+                with open(meta_path, 'w', encoding='utf-8') as f:
+                    f.write(updated)
+                return meta_path
+        except Exception:
+            pass
 
     # Extract
     log(f"Processing: {filepath} ({current_hash[:8]}...)")
     mime_type = get_mime_type(filepath)
     ext = file_path.suffix.lower()
     extracted_text = ""
+    layout = {}
     start_time = datetime.datetime.now()
 
-    if ext == '.pdf': extracted_text = extract_pdf(filepath)
+    if ext == '.pdf':
+        extracted_text = extract_pdf(filepath)
+        # Count pages
+        try:
+            r = subprocess.run(['pdfinfo', filepath], capture_output=True, text=True)
+            for line in r.stdout.splitlines():
+                if line.startswith('Pages:'):
+                    layout['pages'] = int(line.split(':')[1].strip())
+        except Exception:
+            pass
     elif ext == '.docx': extracted_text = extract_docx(filepath)
     elif ext == '.doc': extracted_text = extract_doc(filepath)
-    elif ext == '.xlsx': extracted_text = extract_xlsx(filepath)
-    elif ext == '.pptx': extracted_text = extract_pptx(filepath)
+    elif ext == '.xlsx':
+        extracted_text = extract_xlsx(filepath)
+        # Count sheets
+        try:
+            with zipfile.ZipFile(filepath, 'r') as z:
+                sheets = [f for f in z.namelist() if f.startswith('xl/worksheets/sheet') and f.endswith('.xml')]
+                layout['sheets'] = len(sheets)
+        except Exception:
+            pass
+    elif ext == '.pptx':
+        extracted_text = extract_pptx(filepath)
+        try:
+            with zipfile.ZipFile(filepath, 'r') as z:
+                slides = [f for f in z.namelist() if f.startswith('ppt/slides/slide') and f.endswith('.xml')]
+                layout['slides'] = len(slides)
+        except Exception:
+            pass
     elif ext == '.csv': extracted_text = extract_csv(filepath)
     elif ext == '.ipynb': extracted_text = extract_ipynb(filepath)
     elif ext == '.epub': extracted_text = extract_epub(filepath)
@@ -751,6 +802,9 @@ def generate_file_meta(filepath, root_dir, ignore_patterns, force=False):
 
     # Write .meta
     timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    layout_yaml = ""
+    if layout:
+        layout_yaml = "layout:\n" + "".join(f"  {k}: {v}\n" for k, v in layout.items())
     meta_content = f"""--far_version: 1
 source:
   sha256: {current_hash}
@@ -760,7 +814,8 @@ source:
 extract:
   pipeline: {PIPELINE_ID}
   extracted_at: {timestamp}
----
+  deterministic: true
+{layout_yaml}---
 # {file_path.name}
 
 {extracted_text}
