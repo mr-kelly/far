@@ -1,3 +1,10 @@
+---
+name: far
+description: File-Augmented Retrieval — generate persistent .meta sidecar files for PDFs, images, spreadsheets, videos and more, making every binary file readable to AI coding agents.
+allowed-tools: Read, Write, Edit, Bash, Glob
+user-invocable: true
+---
+
 # 📄 /far - File-Augmented Retrieval
 
 > **"Making Every File Readable to Coding Agents via Persistent .meta Sidecars"**
