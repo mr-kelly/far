@@ -121,15 +121,21 @@ project/.dir.meta       ← "What is this project?"
 
 ### Installation
 
-**For Claude Code:**
-```bash
+**In Claude Code:**
+```
 /plugin marketplace add mr-kelly/far
 /plugin install mr-kelly-far
 ```
 
-**For other AI agents (via npx):**
+**Via npx (for other AI agents):**
 ```bash
 npx skills add mr-kelly/far
+```
+
+**Manual:**
+```bash
+git clone https://github.com/mr-kelly/far.git
+# Copy skills/far/ into your project's agent skills directory
 ```
 
 ### Usage
