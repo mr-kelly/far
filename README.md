@@ -18,6 +18,64 @@
 
 ---
 
+## 🚀 Quick Start
+
+### Install
+
+**In Claude Code:**
+```
+/plugin marketplace add mr-kelly/far
+/plugin install mr-kelly-far
+```
+
+**Via npx (other AI agents):**
+```bash
+npx skills add mr-kelly/far
+```
+
+**Manual:**
+```bash
+git clone https://github.com/mr-kelly/far.git
+```
+
+### Run
+
+```bash
+# Scan current directory (recursive)
+far
+
+# Scan specific directory
+far ~/Documents/projects
+
+# Process single file
+far report.pdf
+
+# Force regeneration (ignore cache)
+far . --force
+```
+
+### One Rule for Your Agent
+
+Add to `AGENTS.md` or system prompt — that's all:
+
+```
+When you encounter a binary file you cannot read
+(.png, .pdf, .xlsx, .mp4), check for a .meta file
+beside it. The .meta contains extracted content as
+Markdown. For directory overviews, read .dir.meta.
+```
+
+### Configuration (AI Features)
+
+```bash
+cp skills/far/.env.example skills/far/.env
+# Add OPENAI_API_KEY to enable vision + transcription
+```
+
+Without API keys, FAR falls back to local tools (Tesseract, FFprobe).
+
+---
+
 ## 🎯 The Problem
 
 AI coding agents (Claude Code, Codex, GitHub Copilot) can read code — but they're **blind to 30–40% of critical context** stored in binary formats:
@@ -29,11 +87,9 @@ AI coding agents (Claude Code, Codex, GitHub Copilot) can read code — but they
 | `requirements.pdf` | Nothing |
 | `standup.mp4` | Nothing |
 
-> *"An AI agent operating without access to these files is like a developer who can read code but is forbidden from looking at the design docs, the architecture diagrams, or the product requirements."*
-
 ## 💡 The Solution
 
-FAR generates a persistent `.meta` sidecar next to every binary file — containing the full extracted content as Markdown:
+FAR generates a persistent `.meta` sidecar next to every binary file:
 
 ```
 project/
@@ -45,52 +101,25 @@ project/
 ```
 
 **No vector database. No embedding service. No runtime pipeline.**
-The agent simply reads the `.meta` file directly from the filesystem.
 
-## 📊 Why Not RAG?
-
-RAG has three structural problems FAR solves:
-
-| | RAG | FAR |
-|---|---|---|
-| Infrastructure | 3+ always-running services | Zero |
-| Content quality | Lossy chunks (~500 tokens) | Complete file |
-| Binary support | Partial | Full |
-| Latency | 200–500ms | <10ms |
-| Offline support | ❌ | ✅ |
-
-**Benchmark on 10,000-file heterogeneous corpus:**
-
-| Method | File Discovery | Cross-file Reasoning |
-|--------|---------------|---------------------|
-| grep | 31.2% | — |
-| RAG (LangChain) | 58.7% | 34.1% |
-| Vector + rerank | 52.1% | 41.3% |
-| **FAR (.meta)** | **82.6%** | **71.9%** |
-
-Storage overhead: only **6.3%** (146 MB on a 2.3 GB corpus, vs 890 MB for RAG).
-
-## 🧠 Inspired by Unity Engine
-
-FAR is inspired by Unity's `.meta` asset pipeline — a 20-year-old insight that every binary asset needs a text sidecar for the engine to understand it. FAR applies the same principle to AI coding agents.
-
-```
-player.png      →   player.png.meta   (Unity: engine metadata)
-report.pdf      →   report.pdf.meta   (FAR: AI-readable content)
-```
+---
 
 ## ✨ Features
 
-### 📦 Broad Format Support
+### 📦 Supported Formats
 
-| Format | Extractor | Output |
-|--------|-----------|--------|
-| 📄 PDF | pdfminer + tabula | Full text, tables as Markdown |
-| 🖼️ Images | Tesseract OCR + GPT-4V | Caption + OCR text |
-| 📊 Excel | openpyxl | Sheets as Markdown tables |
-| 📝 Word/PowerPoint | python-docx | Full text |
-| 🎬 Video/Audio | Whisper + ffmpeg | Transcript + topics |
-| 💻 Code/Text | Direct mirror | Full content |
+| Format | Extensions | Extractor | Output |
+|--------|-----------|-----------|--------|
+| 📄 PDF | `.pdf` | pdfminer + tabula | Full text, tables as Markdown |
+| 📝 Word | `.docx`, `.doc` | python-docx / antiword | Full text |
+| 📊 Excel | `.xlsx` | openpyxl | Sheets as Markdown tables |
+| 📽️ PowerPoint | `.pptx` | python-pptx | Slide text |
+| 🖼️ Images | `.png`, `.jpg`, `.jpeg`, `.gif`, `.bmp`, `.webp` | Tesseract OCR + GPT-4V | Caption + OCR text |
+| 🎬 Video | `.mp4`, `.mov`, `.avi`, `.mkv` | ffmpeg + Whisper | Metadata + transcript |
+| 🎵 Audio | `.mp3`, `.wav`, `.m4a`, `.flac` | Whisper | Transcript |
+| 💻 Code | `.py`, `.js`, `.ts`, `.go`, `.rs`, `.java`, `.sh`, ... | Direct mirror | Full content |
+| 📋 Text | `.txt`, `.md`, `.json`, `.yml`, `.xml`, `.html`, `.css` | Direct mirror | Full content |
+| 📦 Other | `*` | Fallback | MIME type + file metadata |
 
 ### ⚡ Intelligent Caching
 
@@ -113,72 +142,38 @@ project/.dir.meta       ← "What is this project?"
 ### 🔒 Privacy & Security
 
 - `.farignore` file (gitignore syntax) to exclude sensitive paths
-- PII redaction rules configurable
-- Encrypted sidecar support (content encrypted, YAML header plaintext)
-- Fully offline — no files leave your machine
+- Fully offline — no files leave your machine without API keys
 
-## 🚀 Quick Start
+---
 
-### Installation
+## 📊 Why Not RAG?
 
-**In Claude Code:**
-```
-/plugin marketplace add mr-kelly/far
-/plugin install mr-kelly-far
-```
+| | RAG | FAR |
+|---|---|---|
+| Infrastructure | 3+ always-running services | Zero |
+| Content quality | Lossy chunks (~500 tokens) | Complete file |
+| Binary support | Partial | Full |
+| Latency | 200–500ms | <10ms |
+| Offline | ❌ | ✅ |
 
-**Via npx (for other AI agents):**
-```bash
-npx skills add mr-kelly/far
-```
+**Benchmark on 10,000-file heterogeneous corpus:**
 
-**Manual:**
-```bash
-git clone https://github.com/mr-kelly/far.git
-# Copy skills/far/ into your project's agent skills directory
-```
+| Method | File Discovery | Cross-file Reasoning |
+|--------|---------------|---------------------|
+| grep | 31.2% | — |
+| RAG (LangChain) | 58.7% | 34.1% |
+| Vector + rerank | 52.1% | 41.3% |
+| **FAR (.meta)** | **82.6%** | **71.9%** |
 
-### Usage
+Storage overhead: only **6.3%** (146 MB on a 2.3 GB corpus, vs 890 MB for RAG).
 
-```bash
-# Scan current directory (recursive)
-far
+## 🧠 Inspired by Unity Engine
 
-# Scan specific directory
-far ~/Documents/projects/files
+FAR is inspired by Unity's `.meta` asset pipeline — every binary asset gets a text sidecar for the engine to understand it. FAR applies the same 20-year-old insight to AI coding agents.
 
-# Process single file
-far report.pdf
-
-# Force regeneration (ignore cache)
-far . --force
-```
-
-### One Rule for Your Agent
-
-Add this to `AGENTS.md` or your system prompt — that's all:
-
-```markdown
-When you encounter a binary file you cannot read
-(.png, .pdf, .xlsx, .mp4), check for a .meta file
-beside it. The .meta contains extracted content as
-Markdown. For directory overviews, read .dir.meta.
-```
-
-### Configuration
-
-Enable AI features (vision, transcription) by creating `.env`:
-
-```bash
-cp skills/far/.env.example skills/far/.env
-# Add your OPENAI_API_KEY
-```
-
-Without API keys, FAR gracefully falls back to local tools (Tesseract, FFprobe).
+---
 
 ## 📐 The `.meta` Format
-
-Every `.meta` file has a YAML frontmatter header + Markdown body:
 
 ```markdown
 ---
@@ -194,34 +189,26 @@ extract:
 # report.pdf
 
 ## Executive Summary
-
 Revenue grew 23% YoY driven by APAC expansion.
 
 ## Table 1 - Revenue by Region
-
 | Region       | Q3 2025 | Growth |
 |--------------|---------|--------|
 | Asia-Pacific | $2.3M   | +28%   |
 | N. America   | $1.9M   | +12%   |
 ```
 
-## 📚 Documentation
-
-Full documentation in [`skills/far/SKILL.md`](skills/far/SKILL.md)
-
 ## 📖 Research
-
-Based on the research paper:
 
 **[File-Augmented Retrieval: Making Every File Readable to Coding Agents via Persistent .meta Sidecars](https://mr-kelly.github.io/research/File-Augmented%20Retrieval%20-%20Making%20Every%20File%20Readable%20to%20Coding%20Agents%20via%20Persistent%20.meta%20Sidecars.pdf)**
 
 *Kelly Peilin Chan, 2026*
 
-Key findings:
-- **82.6%** file-discovery accuracy vs 58.7% for RAG
-- **71.9%** cross-file reasoning accuracy vs 34.1% for RAG
-- **6.3%** storage overhead (vs 38.7% for RAG)
-- **Zero** runtime infrastructure required
+Key findings: **82.6%** file-discovery accuracy (vs 58.7% RAG) · **71.9%** cross-file reasoning (vs 34.1% RAG) · **6.3%** storage overhead · **Zero** runtime infrastructure
+
+## 📚 Documentation
+
+Full documentation in [`skills/far/SKILL.md`](skills/far/SKILL.md)
 
 ## 📄 License
 
