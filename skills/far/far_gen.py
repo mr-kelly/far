@@ -15,8 +15,8 @@ import base64
 from pathlib import Path
 
 # --- Configuration ---
-SKILL_VERSION = "0.6.0"
-PIPELINE_ID = "far_gen_v7"
+SKILL_VERSION = "0.7.0"
+PIPELINE_ID = "far_gen_v8"
 MAX_DIR_SUMMARY_FILES = 50  # Max files to list in .dir.meta summary
 FFMPEG_BIN = "/home/linuxbrew/.linuxbrew/bin/ffmpeg"
 FFPROBE_BIN = "/home/linuxbrew/.linuxbrew/bin/ffprobe"
@@ -200,14 +200,20 @@ def extract_pdf(filepath):
         result = subprocess.run(['pdftotext', '-layout', filepath, '-'], capture_output=True, text=True)
         text = result.stdout
 
-        # Heuristic: If very little text, try OCR (local)
+        # Heuristic: If very little text, try OCR all pages
         if len(text.strip()) < 50:
             try:
-                ppm_proc = subprocess.Popen(['pdftoppm', '-png', '-f', '1', '-l', '1', filepath], stdout=subprocess.PIPE)
-                tess_proc = subprocess.run(['tesseract', '-', '-', '-l', 'eng+chi_sim'], stdin=ppm_proc.stdout, capture_output=True, text=True)
-                ocr_text = tess_proc.stdout
-                if ocr_text.strip():
-                    text = f"{text}\n\n[Local OCR Extraction (Page 1)]:\n{ocr_text}"
+                import tempfile
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    subprocess.run(['pdftoppm', '-png', filepath, os.path.join(tmpdir, 'page')], capture_output=True)
+                    pages = sorted(Path(tmpdir).glob('*.png'))
+                    ocr_parts = []
+                    for i, page in enumerate(pages, 1):
+                        r = subprocess.run(['tesseract', str(page), '-', '-l', 'eng+chi_sim'], capture_output=True, text=True)
+                        if r.returncode == 0 and r.stdout.strip():
+                            ocr_parts.append(f"[Page {i}]:\n{r.stdout.strip()}")
+                    if ocr_parts:
+                        text = f"{text}\n\n[OCR Extraction]:\n" + "\n\n".join(ocr_parts)
             except FileNotFoundError:
                 pass
 
@@ -351,8 +357,61 @@ def extract_pptx(filepath):
         return f"[Error extracting PPTX (native mode): {e}]"
 
 
+def extract_epub(filepath):
+    """Extract text from EPUB by reading HTML content files."""
+    try:
+        import re
+        parts = []
+        with zipfile.ZipFile(filepath, 'r') as z:
+            opf_files = [f for f in z.namelist() if f.endswith('.opf')]
+            spine_items = []
+            if opf_files:
+                with z.open(opf_files[0]) as f:
+                    tree = ET.parse(f)
+                    root = tree.getroot()
+                    manifest = {item.get('id'): item.get('href')
+                                for item in root.findall('.//{http://www.idpf.org/2007/opf}item')}
+                    for itemref in root.findall('.//{http://www.idpf.org/2007/opf}itemref'):
+                        idref = itemref.get('idref')
+                        if idref in manifest:
+                            spine_items.append(manifest[idref])
+            if not spine_items:
+                spine_items = [f for f in z.namelist() if f.endswith(('.html', '.xhtml', '.htm'))]
+            base = (os.path.dirname(opf_files[0]) + '/') if opf_files else ''
+            for item in spine_items[:50]:
+                path = (base + item).lstrip('/')
+                if path not in z.namelist():
+                    path = item
+                if path not in z.namelist():
+                    continue
+                with z.open(path) as f:
+                    content = f.read().decode('utf-8', errors='ignore')
+                text = re.sub(r'<[^>]+>', ' ', content)
+                text = re.sub(r'\s+', ' ', text).strip()
+                if text:
+                    parts.append(text)
+        return "\n\n".join(parts) if parts else "[Empty EPUB]"
+    except Exception as e:
+        return f"[Error extracting EPUB: {e}]"
+
+
+def extract_zip(filepath):
+    """List contents of a ZIP/archive file."""
+    try:
+        with zipfile.ZipFile(filepath, 'r') as z:
+            entries = z.infolist()
+            lines = [f"## Archive Contents ({len(entries)} files)\n"]
+            for entry in entries[:200]:
+                size = f"{entry.file_size:,} bytes" if entry.file_size else "dir"
+                lines.append(f"- `{entry.filename}` ({size})")
+            if len(entries) > 200:
+                lines.append(f"\n*({len(entries)} total, showing first 200)*")
+            return "\n".join(lines)
+    except Exception as e:
+        return f"[Error reading archive: {e}]"
+
+
 def extract_csv(filepath):
-    """Extract CSV as a Markdown table."""
     try:
         import csv
         with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
@@ -510,6 +569,8 @@ def generate_file_meta(filepath, root_dir, ignore_patterns, force=False):
     elif ext == '.pptx': extracted_text = extract_pptx(filepath)
     elif ext == '.csv': extracted_text = extract_csv(filepath)
     elif ext == '.ipynb': extracted_text = extract_ipynb(filepath)
+    elif ext == '.epub': extracted_text = extract_epub(filepath)
+    elif ext in ('.zip', '.jar', '.whl', '.apk'): extracted_text = extract_zip(filepath)
     elif mime_type.startswith('image/'): extracted_text = extract_image_ocr(filepath)
     elif mime_type.startswith('video/') or mime_type.startswith('audio/'): extracted_text = extract_media_metadata(filepath)
     elif mime_type.startswith('text/') or ext in ['.txt', '.md', '.json', '.yml', '.py', '.sh', '.meta', '.js', '.css', '.html', '.xml']:

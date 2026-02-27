@@ -11,7 +11,7 @@ user-invocable: true
 
 FAR is a file augmentation protocol that generates persistent `.meta` sidecar files for binary documents (PDF, DOCX, XLSX, PPTX, Images, etc.). This allows AI coding agents (like OpenClaw, Cursor, GitHub Copilot) to "read" non-text files directly from the file system without requiring external RAG infrastructure.
 
-**Current Version:** 0.6.0
+**Current Version:** 0.7.0
 **Author:** Kelly Peilin Chan
 
 ---
@@ -53,6 +53,8 @@ FAR extracts text and structure from a wide range of formats:
 *   **🎬 Media** (`.mp4`, `.mov`, `.mp3`, `.wav`, `.m4a`, `.flac`): Technical metadata (FFprobe) + **AI Transcription** (Whisper) if configured.
 *   **📋 CSV** (`.csv`): Data rendered as Markdown tables (up to 100 rows).
 *   **📓 Jupyter Notebook** (`.ipynb`): Markdown cells, code cells, and outputs.
+*   **📚 EPUB** (`.epub`): Full text extracted from all chapters in spine order.
+*   **🗜️ Archives** (`.zip`, `.jar`, `.whl`, `.apk`): File listing with sizes.
 *   **💻 Code/Text** (`.py`, `.js`, `.ts`, `.go`, `.rs`, `.md`, `.json`, ...): Direct content mirroring.
 
 ### 2. Intelligent Caching (Incremental Build)
