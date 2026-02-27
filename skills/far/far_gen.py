@@ -15,8 +15,8 @@ import base64
 from pathlib import Path
 
 # --- Configuration ---
-SKILL_VERSION = "0.8.0"
-PIPELINE_ID = "far_gen_v9"
+SKILL_VERSION = "0.9.0"
+PIPELINE_ID = "far_gen_v10"
 MAX_DIR_SUMMARY_FILES = 50  # Max files to list in .dir.meta summary
 FFMPEG_BIN = "/home/linuxbrew/.linuxbrew/bin/ffmpeg"
 FFPROBE_BIN = "/home/linuxbrew/.linuxbrew/bin/ffprobe"
@@ -565,6 +565,82 @@ def extract_rtf(filepath):
         return f"[Error extracting RTF: {e}]"
 
 
+def extract_sqlite(filepath):
+    """[Metadata only] Extract table names, schemas, and row counts from SQLite."""
+    try:
+        import sqlite3
+        con = sqlite3.connect(filepath)
+        cur = con.cursor()
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+        tables = [r[0] for r in cur.fetchall()]
+        parts = [f"## SQLite Database\n\n**Tables:** {len(tables)}\n"]
+        for table in tables:
+            try:
+                cur.execute(f"PRAGMA table_info(`{table}`)")
+                cols = [f"`{r[1]}` {r[2]}" for r in cur.fetchall()]
+                cur.execute(f"SELECT COUNT(*) FROM `{table}`")
+                count = cur.fetchone()[0]
+                parts.append(f"### {table} ({count:,} rows)\n" + ", ".join(cols))
+            except Exception:
+                parts.append(f"### {table} (error reading schema)")
+        con.close()
+        parts.append("\n> [Metadata only] — row content not extracted.")
+        return "\n\n".join(parts)
+    except Exception as e:
+        return f"[Error extracting SQLite: {e}]"
+
+
+def extract_parquet(filepath):
+    """[Metadata only] Extract schema and row count from Parquet file."""
+    try:
+        import struct
+        # Read Parquet footer magic to confirm format, then use pyarrow if available
+        try:
+            import pyarrow.parquet as pq
+            pf = pq.read_metadata(filepath)
+            schema = pq.read_schema(filepath)
+            fields = [f"`{f.name}` {f.type}" for f in schema]
+            parts = [
+                f"## Parquet File",
+                f"**Rows:** {pf.num_rows:,}  **Row groups:** {pf.num_row_groups}  **Columns:** {len(fields)}",
+                "\n### Schema\n" + "\n".join(f"- {f}" for f in fields),
+                "\n> [Metadata only] — row content not extracted.",
+            ]
+            return "\n\n".join(parts)
+        except ImportError:
+            return "[Metadata only] Parquet file detected. Install `pyarrow` for schema extraction."
+    except Exception as e:
+        return f"[Error extracting Parquet: {e}]"
+
+
+def extract_design_metadata(filepath):
+    """[Metadata only] Extract basic metadata from .fig / .sketch / .xd design files."""
+    try:
+        stat = os.stat(filepath)
+        ext = Path(filepath).suffix.lower()
+        name = Path(filepath).name
+        size_kb = stat.st_size / 1024
+        # .sketch and .fig are zip-based, try to list internal structure
+        try:
+            with zipfile.ZipFile(filepath, 'r') as z:
+                entries = z.namelist()
+                pages = [e for e in entries if 'page' in e.lower() or 'canvas' in e.lower()]
+                parts = [
+                    f"## {name}",
+                    f"**Format:** {ext[1:].upper()}  **Size:** {size_kb:.1f} KB",
+                    f"**Internal files:** {len(entries)}",
+                ]
+                if pages:
+                    parts.append(f"**Pages/Canvases:** {len(pages)}")
+                parts.append("\n> [Metadata only] — design content requires native app to render.")
+                return "\n\n".join(parts)
+        except Exception:
+            return (f"## {name}\n\n**Format:** {ext[1:].upper()}  **Size:** {size_kb:.1f} KB"
+                    "\n\n> [Metadata only] — design content requires native app to render.")
+    except Exception as e:
+        return f"[Error reading design file: {e}]"
+
+
 # --- Ignorer ---
 
 def load_farignore(root_dir):
@@ -642,6 +718,9 @@ def generate_file_meta(filepath, root_dir, ignore_patterns, force=False):
     elif ext in ('.tar', '.gz', '.bz2', '.xz', '.tgz'): extracted_text = extract_tar(filepath)
     elif ext in ('.eml', '.msg'): extracted_text = extract_eml(filepath)
     elif ext == '.rtf': extracted_text = extract_rtf(filepath)
+    elif ext in ('.db', '.sqlite', '.sqlite3'): extracted_text = extract_sqlite(filepath)
+    elif ext == '.parquet': extracted_text = extract_parquet(filepath)
+    elif ext in ('.fig', '.sketch', '.xd'): extracted_text = extract_design_metadata(filepath)
     elif mime_type.startswith('image/'): extracted_text = extract_image_ocr(filepath)
     elif mime_type.startswith('video/') or mime_type.startswith('audio/'): extracted_text = extract_media_metadata(filepath)
     elif mime_type.startswith('text/') or ext in ['.txt', '.md', '.json', '.yml', '.py', '.sh', '.meta', '.js', '.css', '.html', '.xml']:
