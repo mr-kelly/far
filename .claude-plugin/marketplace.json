@@ -1,0 +1,21 @@
+{
+  "name": "mr-kelly-far",
+  "owner": {
+    "name": "Kelly"
+  },
+  "metadata": {
+    "description": "FAR (File-Augmented Retrieval) skill marketplace",
+    "version": "0.5.0"
+  },
+  "plugins": [
+    {
+      "name": "mr-kelly-far",
+      "description": "File-Augmented Retrieval protocol for AI agents",
+      "source": "./",
+      "strict": false,
+      "skills": [
+        "./skills/far"
+      ]
+    }
+  ]
+}
