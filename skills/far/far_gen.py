@@ -15,8 +15,8 @@ import base64
 from pathlib import Path
 
 # --- Configuration ---
-SKILL_VERSION = "0.7.0"
-PIPELINE_ID = "far_gen_v8"
+SKILL_VERSION = "0.8.0"
+PIPELINE_ID = "far_gen_v9"
 MAX_DIR_SUMMARY_FILES = 50  # Max files to list in .dir.meta summary
 FFMPEG_BIN = "/home/linuxbrew/.linuxbrew/bin/ffmpeg"
 FFPROBE_BIN = "/home/linuxbrew/.linuxbrew/bin/ffprobe"
@@ -497,6 +497,74 @@ def extract_image_ocr(filepath):
     return local_ocr
 
 
+def extract_tar(filepath):
+    """List contents of a tar/tar.gz/tar.bz2 archive."""
+    try:
+        import tarfile
+        with tarfile.open(filepath, 'r:*') as t:
+            members = t.getmembers()
+            lines = [f"## Archive Contents ({len(members)} entries)\n"]
+            for m in members[:200]:
+                size = f"{m.size:,} bytes" if m.isfile() else "dir"
+                lines.append(f"- `{m.name}` ({size})")
+            if len(members) > 200:
+                lines.append(f"\n*({len(members)} total, showing first 200)*")
+            return "\n".join(lines)
+    except Exception as e:
+        return f"[Error reading archive: {e}]"
+
+
+def extract_eml(filepath):
+    """Extract email content: headers + body + attachment list."""
+    try:
+        import email
+        with open(filepath, 'rb') as f:
+            msg = email.message_from_bytes(f.read())
+        parts = []
+        parts.append(f"**From:** {msg.get('From', '')}")
+        parts.append(f"**To:** {msg.get('To', '')}")
+        parts.append(f"**Subject:** {msg.get('Subject', '')}")
+        parts.append(f"**Date:** {msg.get('Date', '')}")
+        parts.append("")
+        attachments = []
+        for part in msg.walk():
+            ct = part.get_content_type()
+            cd = str(part.get('Content-Disposition', ''))
+            if 'attachment' in cd:
+                attachments.append(part.get_filename() or 'unnamed')
+            elif ct == 'text/plain' and 'attachment' not in cd:
+                payload = part.get_payload(decode=True)
+                if payload:
+                    parts.append(payload.decode('utf-8', errors='ignore'))
+            elif ct == 'text/html' and 'attachment' not in cd:
+                payload = part.get_payload(decode=True)
+                if payload:
+                    import re
+                    text = re.sub(r'<[^>]+>', ' ', payload.decode('utf-8', errors='ignore'))
+                    text = re.sub(r'\s+', ' ', text).strip()
+                    parts.append(text)
+        if attachments:
+            parts.append(f"\n**Attachments:** {', '.join(attachments)}")
+        return "\n".join(parts)
+    except Exception as e:
+        return f"[Error extracting email: {e}]"
+
+
+def extract_rtf(filepath):
+    """Extract plain text from RTF by stripping control words."""
+    try:
+        import re
+        with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+            content = f.read()
+        # Remove RTF control words and groups
+        text = re.sub(r'\\[a-z]+[-]?\d*[ ]?', '', content)
+        text = re.sub(r'[{}\\]', '', text)
+        text = re.sub(r'\s+', ' ', text).strip()
+        return text
+    except Exception as e:
+        return f"[Error extracting RTF: {e}]"
+
+
 # --- Ignorer ---
 
 def load_farignore(root_dir):
@@ -571,6 +639,9 @@ def generate_file_meta(filepath, root_dir, ignore_patterns, force=False):
     elif ext == '.ipynb': extracted_text = extract_ipynb(filepath)
     elif ext == '.epub': extracted_text = extract_epub(filepath)
     elif ext in ('.zip', '.jar', '.whl', '.apk'): extracted_text = extract_zip(filepath)
+    elif ext in ('.tar', '.gz', '.bz2', '.xz', '.tgz'): extracted_text = extract_tar(filepath)
+    elif ext in ('.eml', '.msg'): extracted_text = extract_eml(filepath)
+    elif ext == '.rtf': extracted_text = extract_rtf(filepath)
     elif mime_type.startswith('image/'): extracted_text = extract_image_ocr(filepath)
     elif mime_type.startswith('video/') or mime_type.startswith('audio/'): extracted_text = extract_media_metadata(filepath)
     elif mime_type.startswith('text/') or ext in ['.txt', '.md', '.json', '.yml', '.py', '.sh', '.meta', '.js', '.css', '.html', '.xml']:

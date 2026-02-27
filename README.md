@@ -5,7 +5,7 @@
 **Making Every File Readable to AI Coding Agents**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.7.0-blue.svg)](https://github.com/mr-kelly/far)
+[![Version](https://img.shields.io/badge/version-0.8.0-blue.svg)](https://github.com/mr-kelly/far)
 
 [📖 Read the Paper](https://mr-kelly.github.io/research/File-Augmented%20Retrieval%20-%20Making%20Every%20File%20Readable%20to%20Coding%20Agents%20via%20Persistent%20.meta%20Sidecars.pdf) • [🚀 Quick Start](#-quick-start) • [✨ Features](#-features)
 
@@ -123,6 +123,9 @@ project/
 | 📓 Jupyter | `.ipynb` | Built-in | Markdown + code cells + outputs |
 | 📚 EPUB | `.epub` | Built-in | Full text from all chapters |
 | 🗜️ Archive | `.zip`, `.jar`, `.whl`, `.apk` | Built-in | File listing with sizes |
+| 📦 Tar | `.tar`, `.tar.gz`, `.tgz`, `.bz2`, `.xz` | Built-in | File listing with sizes |
+| 📧 Email | `.eml`, `.msg` | Built-in | Headers + body + attachment list |
+| 📝 RTF | `.rtf` | Built-in | Plain text extraction |
 | 💻 Code | `.py`, `.js`, `.ts`, `.go`, `.rs`, `.java`, `.sh`, ... | Direct mirror | Full content |
 | 📋 Text | `.txt`, `.md`, `.json`, `.yml`, `.xml`, `.html`, `.css` | Direct mirror | Full content |
 | 📦 Other | `*` | Fallback | MIME type + file metadata |
