@@ -163,3 +163,21 @@ class TestFormats(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    # --- Video Processing ---
+    def test_video_metadata(self):
+        # Create a tiny 1-second dummy video using ffmpeg
+        p = os.path.join(self.d, "dummy.mp4")
+        import subprocess
+        try:
+            subprocess.run([
+                'ffmpeg', '-y', '-f', 'lavfi', '-i', 'color=c=blue:s=320x240:d=1', p
+            ], capture_output=True, check=True)
+        except Exception:
+            self.skipTest("ffmpeg not available to create test video")
+
+        # Test base extraction (metadata only, no OCR by default if mode A finds no text)
+        os.environ["FAR_VIDEO_MODE"] = "A"
+        result = far_gen.extract_media_metadata(p, "video/mp4")
+        self.assertIn("Media Info (ffprobe)", result)
+        self.assertIn("duration", result)
