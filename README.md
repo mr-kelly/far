@@ -87,6 +87,8 @@ AI coding agents (Claude Code, Codex, GitHub Copilot) can read code — but they
 | `requirements.pdf` | Nothing |
 | `standup.mp4` | Nothing |
 
+> *"An AI agent operating without access to these files is like a developer who can read code but is forbidden from looking at the design docs, the architecture diagrams, or the product requirements."*
+
 ## 💡 The Solution
 
 FAR generates a persistent `.meta` sidecar next to every binary file:
@@ -127,11 +129,11 @@ Two-layer cache for instant incremental builds:
 1. **Fast check** (mtime + size) — skip unchanged files in 0.003s
 2. **Content check** (SHA-256) — detect true changes even if timestamp differs
 
-On a 10,000-file repo with 50 changed files → only 50 extraction calls.
+Only files whose content has actually changed are re-extracted. The rest are instant cache hits.
 
 ### 📁 Directory Summaries
 
-Auto-generated `.dir.meta` files let agents "browse" entire directories:
+Auto-generated `.dir.meta` files let agents "browse" entire directories without reading every file:
 
 ```
 project/.dir.meta       ← "What is this project?"
@@ -141,35 +143,58 @@ project/.dir.meta       ← "What is this project?"
 
 ### 🔒 Privacy & Security
 
-- `.farignore` file (gitignore syntax) to exclude sensitive paths
+- `.farignore` file (gitignore syntax) to exclude sensitive paths and directories
 - Fully offline — no files leave your machine without API keys
+- Selective extraction: mark directories as "metadata-only" (no content extraction)
 
 ---
 
 ## 📊 Why Not RAG?
 
+RAG chunks documents into 500–1000 token fragments. This **destroys structure**:
+
+```
+Original table in report.pdf:
+| Region  | Revenue | Growth |
+| APAC    | $2.3M   | +28%   |   ← complete, meaningful
+| NA      | $1.9M   | +12%   |
+
+After RAG chunking:
+  Chunk 37: "...APAC $2.3M +28% NA"
+  Chunk 38: "$1.9M +12% Europe..."  ← table split, context lost
+```
+
+FAR preserves the full file structure in every `.meta`. The agent always gets the complete picture.
+
 | | RAG | FAR |
 |---|---|---|
 | Infrastructure | 3+ always-running services | Zero |
-| Content quality | Lossy chunks (~500 tokens) | Complete file |
+| Content quality | Lossy chunks | Complete file |
 | Binary support | Partial | Full |
 | Latency | 200–500ms | <10ms |
 | Offline | ❌ | ✅ |
 
-**Benchmark on 10,000-file heterogeneous corpus:**
-
-| Method | File Discovery | Cross-file Reasoning |
-|--------|---------------|---------------------|
-| grep | 31.2% | — |
-| RAG (LangChain) | 58.7% | 34.1% |
-| Vector + rerank | 52.1% | 41.3% |
-| **FAR (.meta)** | **82.6%** | **71.9%** |
-
-Storage overhead: only **6.3%** (146 MB on a 2.3 GB corpus, vs 890 MB for RAG).
-
 ## 🧠 Inspired by Unity Engine
 
-FAR is inspired by Unity's `.meta` asset pipeline — every binary asset gets a text sidecar for the engine to understand it. FAR applies the same 20-year-old insight to AI coding agents.
+In 2005, Unity faced the same problem — game assets (`.png`, `.fbx`, `.wav`) are binary and opaque to the engine. Their solution: **every asset gets a persistent text sidecar**.
+
+```
+player.png      →   player.png.meta   (Unity: engine metadata)
+report.pdf      →   report.pdf.meta   (FAR: AI-readable content)
+```
+
+Twenty years later, FAR applies the same insight to AI coding agents.
+
+## 🔌 Ecosystem Compatibility
+
+FAR sits at the **file layer** of the AI infrastructure stack — complementing, not replacing, existing tools:
+
+| Standard | Scope | Relationship to FAR |
+|----------|-------|---------------------|
+| `AGENTS.md` | Project instructions | Add one FAR rule |
+| `llms.txt` | Site/project summary | FAR is per-file granularity |
+| MCP | Tool/resource protocol | FAR can be exposed as MCP resource |
+| RAG | Query-time retrieval | FAR provides clean, structured input |
 
 ---
 
@@ -203,8 +228,6 @@ Revenue grew 23% YoY driven by APAC expansion.
 **[File-Augmented Retrieval: Making Every File Readable to Coding Agents via Persistent .meta Sidecars](https://mr-kelly.github.io/research/File-Augmented%20Retrieval%20-%20Making%20Every%20File%20Readable%20to%20Coding%20Agents%20via%20Persistent%20.meta%20Sidecars.pdf)**
 
 *Kelly Peilin Chan, 2026*
-
-Key findings: **82.6%** file-discovery accuracy (vs 58.7% RAG) · **71.9%** cross-file reasoning (vs 34.1% RAG) · **6.3%** storage overhead · **Zero** runtime infrastructure
 
 ## 📚 Documentation
 
