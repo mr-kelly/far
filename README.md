@@ -25,7 +25,7 @@
 **In Claude Code:**
 ```
 /plugin marketplace add mr-kelly/far
-/plugin install mr-kelly-far
+/plugin install far
 ```
 
 **Via npx (other AI agents):**

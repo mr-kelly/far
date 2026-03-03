@@ -5,11 +5,11 @@
   },
   "metadata": {
     "description": "FAR (File-Augmented Retrieval) skill marketplace",
-    "version": "0.5.0"
+    "version": "1.0.0"
   },
   "plugins": [
     {
-      "name": "mr-kelly-far",
+      "name": "far",
       "description": "File-Augmented Retrieval protocol for AI agents",
       "source": "./",
       "strict": false,
