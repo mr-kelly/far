@@ -12,11 +12,13 @@ import urllib.request
 import urllib.error
 import json
 import base64
+import tempfile
+import shutil
 from pathlib import Path
 
 # --- Configuration ---
 SKILL_VERSION = "1.0.0"
-PIPELINE_ID = "far_gen_v12"
+PIPELINE_ID = "far_gen_v13"
 MAX_DIR_SUMMARY_FILES = 50  # Max files to list in .dir.meta summary
 FFMPEG_BIN = "/home/linuxbrew/.linuxbrew/bin/ffmpeg"
 FFPROBE_BIN = "/home/linuxbrew/.linuxbrew/bin/ffprobe"
@@ -193,6 +195,142 @@ def openai_vision(filepath):
         return f"[AI Vision Error: {e}]"
 
 
+def apple_vision(filepath):
+    """Describe image using Apple's on-device Vision framework (macOS only)."""
+    if sys.platform != 'darwin':
+        return None
+
+    use_apple_vision = os.environ.get("FAR_USE_APPLE_VISION", "1").lower()
+    if use_apple_vision in ("0", "false", "no", "off"):
+        return None
+
+    if shutil.which('swift') is None:
+        return None
+
+    swift_code = r'''
+import Foundation
+import Vision
+import ImageIO
+
+func jsonString(_ obj: Any) {
+    if let data = try? JSONSerialization.data(withJSONObject: obj, options: []),
+       let str = String(data: data, encoding: .utf8) {
+        print(str)
+    } else {
+        print("{}")
+    }
+}
+
+guard CommandLine.arguments.count > 1 else {
+    jsonString(["error": "Missing image path"])
+    exit(0)
+}
+
+let imagePath = CommandLine.arguments[1]
+let imageURL = URL(fileURLWithPath: imagePath)
+
+guard let src = CGImageSourceCreateWithURL(imageURL as CFURL, nil),
+      let cgImage = CGImageSourceCreateImageAtIndex(src, 0, nil) else {
+    jsonString(["error": "Cannot decode image"])
+    exit(0)
+}
+
+var payload: [String: Any] = [:]
+
+// OCR
+let textRequest = VNRecognizeTextRequest()
+textRequest.recognitionLevel = .accurate
+textRequest.usesLanguageCorrection = true
+textRequest.recognitionLanguages = ["en-US", "zh-Hans"]
+
+let textHandler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+do {
+    try textHandler.perform([textRequest])
+    let lines = (textRequest.results ?? []).compactMap { obs in
+        obs.topCandidates(1).first?.string
+    }
+    if !lines.isEmpty {
+        payload["ocr"] = lines.joined(separator: "\n")
+    }
+} catch {
+    payload["ocr_error"] = String(describing: error)
+}
+
+// Labels
+if #available(macOS 11.0, *) {
+    let clsRequest = VNClassifyImageRequest()
+    let clsHandler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+    do {
+        try clsHandler.perform([clsRequest])
+        let labels = (clsRequest.results ?? [])
+            .filter { $0.confidence >= 0.10 }
+            .prefix(8)
+            .map { ["label": $0.identifier, "confidence": Double($0.confidence)] }
+        if !labels.isEmpty {
+            payload["labels"] = labels
+        }
+    } catch {
+        payload["label_error"] = String(describing: error)
+    }
+}
+
+jsonString(payload)
+'''
+
+    script_path = None
+    try:
+        with tempfile.NamedTemporaryFile('w', suffix='.swift', delete=False, encoding='utf-8') as tf:
+            tf.write(swift_code)
+            script_path = tf.name
+
+        result = subprocess.run(
+            ['swift', script_path, filepath],
+            capture_output=True,
+            text=True,
+            timeout=20
+        )
+
+        if result.returncode != 0:
+            return None
+
+        output = (result.stdout or '').strip()
+        if not output:
+            return None
+
+        data = json.loads(output)
+        if not isinstance(data, dict):
+            return None
+
+        lines = []
+        labels = data.get('labels') or []
+        if labels:
+            formatted = []
+            for item in labels:
+                try:
+                    label = item.get('label', '')
+                    confidence = float(item.get('confidence', 0))
+                    if label:
+                        formatted.append(f"{label} ({confidence:.2f})")
+                except Exception:
+                    continue
+            if formatted:
+                lines.append("[Apple Vision Labels]: " + ", ".join(formatted))
+
+        ocr = (data.get('ocr') or '').strip()
+        if ocr:
+            lines.append(f"[Apple Vision OCR]:\n{ocr}")
+
+        return "\n\n".join(lines) if lines else None
+    except Exception:
+        return None
+    finally:
+        if script_path and os.path.exists(script_path):
+            try:
+                os.remove(script_path)
+            except Exception:
+                pass
+
+
 # --- Local Extractors ---
 
 def extract_pdf(filepath):
@@ -250,9 +388,12 @@ def extract_pdf_images(filepath):
                         ocr = r.stdout.strip()
                 except FileNotFoundError:
                     pass
+                apple = apple_vision(str(img))
                 ai = openai_vision(str(img))
-                if ai or ocr:
+                if ai or ocr or apple:
                     parts.append(f"### Image {i}")
+                    if apple:
+                        parts.append(apple)
                     if ai:
                         parts.append(ai)
                     if ocr:
@@ -553,21 +694,29 @@ def extract_media_metadata(filepath, mime_type):
 
     
 def extract_image_ocr(filepath):
-    """Extract text from image using tesseract (local) + AI Vision (optional)."""
-    local_ocr = ""
+    """Extract image content via local OCR, Apple Vision (macOS), and optional OpenAI Vision."""
+    parts = []
+
+    # Local OCR
     try:
         subprocess.run(['tesseract', '--version'], capture_output=True, check=False)
         result = subprocess.run(['tesseract', filepath, '-', '-l', 'eng+chi_sim'], capture_output=True, text=True)
-        if result.returncode == 0:
-             local_ocr = f"[Local OCR]:\n{result.stdout}"
+        if result.returncode == 0 and result.stdout.strip():
+            parts.append(f"[Local OCR]:\n{result.stdout}")
     except FileNotFoundError:
-        local_ocr = "[Error: tesseract not installed]"
+        parts.append("[Error: tesseract not installed]")
 
-    # AI Enhancement
+    # Apple Vision (on-device, macOS only)
+    apple = apple_vision(filepath)
+    if apple:
+        parts.append(apple)
+
+    # OpenAI Vision (optional, API)
     ai_vision = openai_vision(filepath)
     if ai_vision:
-        return f"{local_ocr}\n\n{ai_vision}"
-    return local_ocr
+        parts.append(ai_vision)
+
+    return "\n\n".join(parts).strip()
 
 
 def extract_tar(filepath):

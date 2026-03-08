@@ -49,7 +49,7 @@ FAR extracts text and structure from a wide range of formats:
 *   **📝 Word** (`.docx`, `.doc`): Text extraction.
 *   **📊 Excel** (`.xlsx`): Sheet data converted to Markdown tables.
 *   **📽️ PowerPoint** (`.pptx`): Slide text extraction.
-*   **🖼️ Images** (`.png`, `.jpg`, `.jpeg`, `.gif`, `.bmp`, `.webp`): **OCR** (Tesseract) + **AI Vision** (GPT-4o) if configured.
+*   **🖼️ Images** (`.png`, `.jpg`, `.jpeg`, `.gif`, `.bmp`, `.webp`): **OCR** (Tesseract) + **Apple Vision (on-device, macOS)** + **AI Vision** (GPT-4o) if configured.
 *   **🎬 Media** (`.mp4`, `.mov`, `.mp3`, `.wav`, `.m4a`, `.flac`): Technical metadata (FFprobe) + **AI Transcription** (Whisper) if configured.
 *   **📋 CSV** (`.csv`): Data rendered as Markdown tables (up to 100 rows).
 *   **📓 Jupyter Notebook** (`.ipynb`): Markdown cells, code cells, and outputs.
@@ -117,9 +117,12 @@ Copy `.env.example` as a template:
 OPENAI_API_KEY=sk-your-key-here
 # Optional
 OPENAI_BASE_URL=https://api.openai.com/v1
+# Optional (macOS default: enabled)
+FAR_USE_APPLE_VISION=1
 ```
 
-If API keys are missing, FAR gracefully falls back to local tools (Tesseract, FFprobe).
+If API keys are missing, FAR gracefully falls back to local tools (Tesseract, FFprobe),
+and on macOS it also uses Apple Vision on-device by default.
 
 ### Configuration (Ignore)
 Create a `.farignore` file in your project root to exclude files or directories from scanning.
@@ -191,6 +194,7 @@ Cache invalidation: a `.meta` is stale if `sha256` or `pipeline` version has cha
 - [x] OCR for Images/Scanned PDFs (Tesseract)
 - [x] Media Metadata (FFprobe) + Transcription (Whisper)
 - [x] AI Vision for Images (GPT-4o)
+- [x] Apple Vision for Images (on-device, macOS)
 - [x] PDF Embedded Image Extraction
 - [x] CSV → Markdown Tables
 - [x] Jupyter Notebook Support

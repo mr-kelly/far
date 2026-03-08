@@ -69,10 +69,12 @@ Markdown. For directory overviews, read .dir.meta.
 
 ```bash
 cp skills/far/.env.example skills/far/.env
-# Add OPENAI_API_KEY to enable vision + transcription
+# Add OPENAI_API_KEY to enable OpenAI vision + transcription
+# Optional: FAR_USE_APPLE_VISION=1 (on macOS, default is enabled)
 ```
 
-Without API keys, FAR falls back to local tools (Tesseract, FFprobe).
+Without API keys, FAR falls back to local tools (Tesseract, FFprobe),
+and on macOS it also uses Apple Vision on-device.
 
 ---
 
@@ -116,7 +118,7 @@ project/
 | 📝 Word | `.docx`, `.doc` | python-docx / antiword | Full text |
 | 📊 Excel | `.xlsx` | openpyxl | Sheets as Markdown tables |
 | 📽️ PowerPoint | `.pptx` | python-pptx | Slide text |
-| 🖼️ Images | `.png`, `.jpg`, `.jpeg`, `.gif`, `.bmp`, `.webp` | Tesseract OCR + GPT-4V | Caption + OCR text |
+| 🖼️ Images | `.png`, `.jpg`, `.jpeg`, `.gif`, `.bmp`, `.webp` | Tesseract OCR + Apple Vision (macOS) + GPT-4V | Caption + OCR text + labels |
 | 🎬 Video | `.mp4`, `.mov`, `.avi`, `.mkv` | ffmpeg + Whisper | Metadata + transcript |
 | 🎵 Audio | `.mp3`, `.wav`, `.m4a`, `.flac` | Whisper | Transcript |
 | 📋 CSV | `.csv` | Built-in | Markdown table (up to 100 rows) |
