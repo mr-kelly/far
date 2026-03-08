@@ -50,7 +50,7 @@ FAR extracts text and structure from a wide range of formats:
 *   **📊 Excel** (`.xlsx`): Sheet data converted to Markdown tables.
 *   **📽️ PowerPoint** (`.pptx`): Slide text extraction.
 *   **🖼️ Images** (`.png`, `.jpg`, `.jpeg`, `.gif`, `.bmp`, `.webp`): **OCR** (Tesseract) + **Apple Vision (on-device, macOS)** + **AI Vision** (GPT-4o) if configured.
-*   **🎬 Media** (`.mp4`, `.mov`, `.mp3`, `.wav`, `.m4a`, `.flac`): Technical metadata (FFprobe) + **AI Transcription** (Whisper) if configured.
+*   **🎬 Media** (`.mp4`, `.mov`, `.mp3`, `.wav`, `.m4a`, `.flac`): Technical metadata (FFprobe) + **Apple Vision video-frame analysis (macOS)** + **AI Transcription** (Whisper) if configured.
 *   **📋 CSV** (`.csv`): Data rendered as Markdown tables (up to 100 rows).
 *   **📓 Jupyter Notebook** (`.ipynb`): Markdown cells, code cells, and outputs.
 *   **📚 EPUB** (`.epub`): Full text extracted from all chapters in spine order.
@@ -119,10 +119,15 @@ OPENAI_API_KEY=sk-your-key-here
 OPENAI_BASE_URL=https://api.openai.com/v1
 # Optional (macOS default: enabled)
 FAR_USE_APPLE_VISION=1
+# Optional (macOS default: enabled)
+FAR_USE_MACOS_METADATA=1
+# Optional tuning
+FAR_APPLE_VISION_TIMEOUT=25
+FAR_APPLE_VISION_MAX_FRAMES=6
 ```
 
 If API keys are missing, FAR gracefully falls back to local tools (Tesseract, FFprobe),
-and on macOS it also uses Apple Vision on-device by default.
+and on macOS it also uses Apple Vision + Spotlight metadata on-device by default.
 
 ### Configuration (Ignore)
 Create a `.farignore` file in your project root to exclude files or directories from scanning.
@@ -170,7 +175,7 @@ source:
   size: 129509
   mtime: 1708845210.5
 extract:
-  pipeline: far_gen_v11
+  pipeline: far_gen_v14
   extracted_at: 2026-02-27T10:00:00Z
   deterministic: true
 layout:
@@ -195,6 +200,9 @@ Cache invalidation: a `.meta` is stale if `sha256` or `pipeline` version has cha
 - [x] Media Metadata (FFprobe) + Transcription (Whisper)
 - [x] AI Vision for Images (GPT-4o)
 - [x] Apple Vision for Images (on-device, macOS)
+- [x] Apple Vision for Video Frames (on-device labels/OCR/faces/barcodes/pose)
+- [x] Apple Vision Feature Print fingerprint (on-device embedding hash)
+- [x] macOS Spotlight metadata enrichment (mdls)
 - [x] PDF Embedded Image Extraction
 - [x] CSV → Markdown Tables
 - [x] Jupyter Notebook Support

@@ -70,11 +70,14 @@ Markdown. For directory overviews, read .dir.meta.
 ```bash
 cp skills/far/.env.example skills/far/.env
 # Add OPENAI_API_KEY to enable OpenAI vision + transcription
-# Optional: FAR_USE_APPLE_VISION=1 (on macOS, default is enabled)
+# Optional (macOS):
+# FAR_USE_APPLE_VISION=1
+# FAR_USE_MACOS_METADATA=1
+# FAR_APPLE_VISION_MAX_FRAMES=6
 ```
 
 Without API keys, FAR falls back to local tools (Tesseract, FFprobe),
-and on macOS it also uses Apple Vision on-device.
+and on macOS it also uses Apple Vision + Spotlight metadata on-device.
 
 ---
 
@@ -119,7 +122,7 @@ project/
 | 📊 Excel | `.xlsx` | openpyxl | Sheets as Markdown tables |
 | 📽️ PowerPoint | `.pptx` | python-pptx | Slide text |
 | 🖼️ Images | `.png`, `.jpg`, `.jpeg`, `.gif`, `.bmp`, `.webp` | Tesseract OCR + Apple Vision (macOS) + GPT-4V | Caption + OCR text + labels |
-| 🎬 Video | `.mp4`, `.mov`, `.avi`, `.mkv` | ffmpeg + Whisper | Metadata + transcript |
+| 🎬 Video | `.mp4`, `.mov`, `.avi`, `.mkv` | ffmpeg + Tesseract + Apple Vision (macOS) + Whisper | Metadata + OCR + on-device scene summary + transcript |
 | 🎵 Audio | `.mp3`, `.wav`, `.m4a`, `.flac` | Whisper | Transcript |
 | 📋 CSV | `.csv` | Built-in | Markdown table (up to 100 rows) |
 | 📓 Jupyter | `.ipynb` | Built-in | Markdown + code cells + outputs |
@@ -134,6 +137,13 @@ project/
 | 💻 Code | `.py`, `.js`, `.ts`, `.go`, `.rs`, `.java`, `.sh`, ... | Direct mirror | Full content |
 | 📋 Text | `.txt`, `.md`, `.json`, `.yml`, `.xml`, `.html`, `.css` | Direct mirror | Full content |
 | 📦 Other | `*` | Fallback | MIME type + file metadata |
+
+### 🍎 macOS On-Device Enhancements
+
+When running on macOS (default enabled):
+- Apple Vision for images and video frames (OCR, labels, faces, barcodes/QR, body pose)
+- Apple Vision feature-print fingerprint hash for image similarity workflows
+- Spotlight (`mdls`) metadata enrichment in `.meta` files
 
 ### ⚡ Intelligent Caching
 
@@ -220,7 +230,7 @@ source:
   mime: application/pdf
   size: 129509
 extract:
-  pipeline: far_gen_v6
+  pipeline: far_gen_v14
   extracted_at: 2026-02-27T10:00:00Z
 ---
 # report.pdf

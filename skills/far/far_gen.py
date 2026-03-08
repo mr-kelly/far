@@ -18,7 +18,7 @@ from pathlib import Path
 
 # --- Configuration ---
 SKILL_VERSION = "1.0.0"
-PIPELINE_ID = "far_gen_v13"
+PIPELINE_ID = "far_gen_v14"
 MAX_DIR_SUMMARY_FILES = 50  # Max files to list in .dir.meta summary
 FFMPEG_BIN = "/home/linuxbrew/.linuxbrew/bin/ffmpeg"
 FFPROBE_BIN = "/home/linuxbrew/.linuxbrew/bin/ffprobe"
@@ -195,22 +195,64 @@ def openai_vision(filepath):
         return f"[AI Vision Error: {e}]"
 
 
-def apple_vision(filepath):
-    """Describe image using Apple's on-device Vision framework (macOS only)."""
+def _is_enabled(env_key, default="1"):
+    val = os.environ.get(env_key, default).strip().lower()
+    return val not in ("0", "false", "no", "off")
+
+
+def _run_swift_json(swift_code, args, timeout=25):
+    if shutil.which('swift') is None:
+        return None
+
+    script_path = None
+    try:
+        with tempfile.NamedTemporaryFile('w', suffix='.swift', delete=False, encoding='utf-8') as tf:
+            tf.write(swift_code)
+            script_path = tf.name
+
+        result = subprocess.run(
+            ['swift', script_path] + list(args),
+            capture_output=True,
+            text=True,
+            timeout=timeout
+        )
+        if result.returncode != 0:
+            return None
+
+        output = (result.stdout or '').strip()
+        if not output:
+            return None
+
+        # Swift tools may print extra lines. Parse the last non-empty JSON line.
+        for line in reversed([l.strip() for l in output.splitlines() if l.strip()]):
+            if line.startswith('{') and line.endswith('}'):
+                try:
+                    return json.loads(line)
+                except Exception:
+                    continue
+        return None
+    except Exception:
+        return None
+    finally:
+        if script_path and os.path.exists(script_path):
+            try:
+                os.remove(script_path)
+            except Exception:
+                pass
+
+
+def apple_vision_json(filepath):
+    """Return Apple Vision structured analysis for an image (macOS only)."""
     if sys.platform != 'darwin':
         return None
-
-    use_apple_vision = os.environ.get("FAR_USE_APPLE_VISION", "1").lower()
-    if use_apple_vision in ("0", "false", "no", "off"):
-        return None
-
-    if shutil.which('swift') is None:
+    if not _is_enabled("FAR_USE_APPLE_VISION", "1"):
         return None
 
     swift_code = r'''
 import Foundation
 import Vision
 import ImageIO
+import CoreImage
 
 func jsonString(_ obj: Any) {
     if let data = try? JSONSerialization.data(withJSONObject: obj, options: []),
@@ -236,16 +278,18 @@ guard let src = CGImageSourceCreateWithURL(imageURL as CFURL, nil),
 }
 
 var payload: [String: Any] = [:]
+payload["width"] = cgImage.width
+payload["height"] = cgImage.height
+
+let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
 
 // OCR
 let textRequest = VNRecognizeTextRequest()
 textRequest.recognitionLevel = .accurate
 textRequest.usesLanguageCorrection = true
 textRequest.recognitionLanguages = ["en-US", "zh-Hans"]
-
-let textHandler = VNImageRequestHandler(cgImage: cgImage, options: [:])
 do {
-    try textHandler.perform([textRequest])
+    try handler.perform([textRequest])
     let lines = (textRequest.results ?? []).compactMap { obs in
         obs.topCandidates(1).first?.string
     }
@@ -259,9 +303,8 @@ do {
 // Labels
 if #available(macOS 11.0, *) {
     let clsRequest = VNClassifyImageRequest()
-    let clsHandler = VNImageRequestHandler(cgImage: cgImage, options: [:])
     do {
-        try clsHandler.perform([clsRequest])
+        try handler.perform([clsRequest])
         let labels = (clsRequest.results ?? [])
             .filter { $0.confidence >= 0.10 }
             .prefix(8)
@@ -274,61 +317,289 @@ if #available(macOS 11.0, *) {
     }
 }
 
+// Faces
+let faceRequest = VNDetectFaceRectanglesRequest()
+do {
+    try handler.perform([faceRequest])
+    payload["face_count"] = faceRequest.results?.count ?? 0
+} catch {
+    payload["face_error"] = String(describing: error)
+}
+
+// Barcodes / QR
+let barcodeRequest = VNDetectBarcodesRequest()
+do {
+    try handler.perform([barcodeRequest])
+    let codes = (barcodeRequest.results ?? []).prefix(12).map { obs in
+        [
+            "symbology": obs.symbology.rawValue,
+            "payload": obs.payloadStringValue ?? ""
+        ]
+    }
+    if !codes.isEmpty {
+        payload["barcodes"] = codes
+    }
+} catch {
+    payload["barcode_error"] = String(describing: error)
+}
+
+// Body pose count
+if #available(macOS 10.15, *) {
+    let poseRequest = VNDetectHumanBodyPoseRequest()
+    do {
+        try handler.perform([poseRequest])
+        payload["body_pose_count"] = poseRequest.results?.count ?? 0
+    } catch {
+        payload["body_pose_error"] = String(describing: error)
+    }
+}
+
+// Feature print embedding fingerprint (hash only)
+if #available(macOS 10.15, *) {
+    let fpRequest = VNGenerateImageFeaturePrintRequest()
+    do {
+        try handler.perform([fpRequest])
+        if let obs = fpRequest.results?.first as? NSObject {
+            var fp: [String: Any] = [:]
+
+            let selCount = NSSelectorFromString("elementCount")
+            if obs.responds(to: selCount), let out = obs.perform(selCount) {
+                if let n = out.takeUnretainedValue() as? NSNumber {
+                    fp["dimensions"] = n.intValue
+                }
+            }
+
+            let selData = NSSelectorFromString("data")
+            if obs.responds(to: selData), let out = obs.perform(selData) {
+                if let data = out.takeUnretainedValue() as? Data {
+                    fp["data_b64"] = data.base64EncodedString()
+                }
+            }
+
+            if !fp.isEmpty {
+                payload["feature_print"] = fp
+            }
+        }
+    } catch {
+        payload["feature_print_error"] = String(describing: error)
+    }
+}
+
 jsonString(payload)
 '''
 
-    script_path = None
+    timeout = int(os.environ.get("FAR_APPLE_VISION_TIMEOUT", "25"))
+    data = _run_swift_json(swift_code, [filepath], timeout=timeout)
+    if isinstance(data, dict):
+        fp = data.get('feature_print')
+        if isinstance(fp, dict) and fp.get('data_b64'):
+            try:
+                raw = base64.b64decode(fp.get('data_b64'))
+                fp['sha256'] = hashlib.sha256(raw).hexdigest()
+            except Exception:
+                pass
+            fp.pop('data_b64', None)
+        return data
+    return None
+
+
+def format_apple_vision(data):
+    if not isinstance(data, dict):
+        return None
+
+    lines = []
+    width = data.get('width')
+    height = data.get('height')
+    if isinstance(width, int) and isinstance(height, int):
+        lines.append(f"[Apple Vision Image Size]: {width}x{height}")
+
+    labels = data.get('labels') or []
+    if labels:
+        formatted = []
+        for item in labels:
+            try:
+                label = item.get('label', '')
+                confidence = float(item.get('confidence', 0))
+                if label:
+                    formatted.append(f"{label} ({confidence:.2f})")
+            except Exception:
+                continue
+        if formatted:
+            lines.append("[Apple Vision Labels]: " + ", ".join(formatted))
+
+    ocr = (data.get('ocr') or '').strip()
+    if ocr:
+        lines.append(f"[Apple Vision OCR]:\n{ocr}")
+
+    face_count = data.get('face_count')
+    if isinstance(face_count, int):
+        lines.append(f"[Apple Vision Faces]: {face_count}")
+
+    body_pose_count = data.get('body_pose_count')
+    if isinstance(body_pose_count, int):
+        lines.append(f"[Apple Vision Body Pose Detections]: {body_pose_count}")
+
+    barcodes = data.get('barcodes') or []
+    if barcodes:
+        barcode_lines = []
+        for b in barcodes:
+            payload = (b.get('payload') or '').strip()
+            sym = b.get('symbology') or 'Unknown'
+            if payload:
+                barcode_lines.append(f"- {sym}: {payload}")
+            else:
+                barcode_lines.append(f"- {sym}")
+        if barcode_lines:
+            lines.append("[Apple Vision Barcodes]:\n" + "\n".join(barcode_lines))
+
+    fp = data.get('feature_print') or {}
+    if isinstance(fp, dict) and fp:
+        dims = fp.get('dimensions')
+        fhash = fp.get('sha256')
+        fp_line = "[Apple Vision Feature Print]"
+        details = []
+        if isinstance(dims, int):
+            details.append(f"dims={dims}")
+        if isinstance(fhash, str) and fhash:
+            details.append(f"sha256={fhash[:16]}…")
+        if details:
+            fp_line += ": " + ", ".join(details)
+        lines.append(fp_line)
+
+    return "\n\n".join(lines) if lines else None
+
+
+def apple_vision(filepath):
+    """Describe image using Apple's on-device Vision framework (macOS only)."""
+    return format_apple_vision(apple_vision_json(filepath))
+
+
+def summarize_apple_vision_frames(frames):
+    """Aggregate Apple Vision analysis across video frames (macOS only)."""
+    if sys.platform != 'darwin' or not _is_enabled("FAR_USE_APPLE_VISION", "1"):
+        return None
+    if not frames:
+        return None
+
     try:
-        with tempfile.NamedTemporaryFile('w', suffix='.swift', delete=False, encoding='utf-8') as tf:
-            tf.write(swift_code)
-            script_path = tf.name
+        max_frames = max(1, int(os.environ.get("FAR_APPLE_VISION_MAX_FRAMES", "6")))
+    except Exception:
+        max_frames = 6
 
-        result = subprocess.run(
-            ['swift', script_path, filepath],
-            capture_output=True,
-            text=True,
-            timeout=20
-        )
+    selected = frames[::max(1, len(frames)//max_frames)][:max_frames]
 
-        if result.returncode != 0:
-            return None
+    label_scores = {}
+    seen_text = set()
+    barcode_hits = set()
+    max_faces = 0
+    body_pose_frames = 0
+    analyzed = 0
 
-        output = (result.stdout or '').strip()
-        if not output:
-            return None
+    for frame in selected:
+        data = apple_vision_json(str(frame))
+        if not data:
+            continue
+        analyzed += 1
 
-        data = json.loads(output)
-        if not isinstance(data, dict):
-            return None
-
-        lines = []
-        labels = data.get('labels') or []
-        if labels:
-            formatted = []
-            for item in labels:
-                try:
-                    label = item.get('label', '')
-                    confidence = float(item.get('confidence', 0))
-                    if label:
-                        formatted.append(f"{label} ({confidence:.2f})")
-                except Exception:
-                    continue
-            if formatted:
-                lines.append("[Apple Vision Labels]: " + ", ".join(formatted))
+        for item in (data.get('labels') or []):
+            label = item.get('label')
+            try:
+                score = float(item.get('confidence', 0))
+            except Exception:
+                score = 0.0
+            if label:
+                label_scores[label] = max(score, label_scores.get(label, 0.0))
 
         ocr = (data.get('ocr') or '').strip()
         if ocr:
-            lines.append(f"[Apple Vision OCR]:\n{ocr}")
+            for line in ocr.splitlines():
+                clean = line.strip()
+                if len(clean) > 2:
+                    seen_text.add(clean)
 
-        return "\n\n".join(lines) if lines else None
-    except Exception:
+        try:
+            max_faces = max(max_faces, int(data.get('face_count', 0)))
+        except Exception:
+            pass
+
+        try:
+            if int(data.get('body_pose_count', 0)) > 0:
+                body_pose_frames += 1
+        except Exception:
+            pass
+
+        for b in (data.get('barcodes') or []):
+            payload = (b.get('payload') or '').strip()
+            sym = (b.get('symbology') or '').strip()
+            if payload:
+                barcode_hits.add(f"{sym}: {payload}" if sym else payload)
+            elif sym:
+                barcode_hits.add(sym)
+
+    if analyzed == 0:
         return None
-    finally:
-        if script_path and os.path.exists(script_path):
-            try:
-                os.remove(script_path)
-            except Exception:
-                pass
+
+    lines = [f"## Apple Vision Video Summary (On-device)\nAnalyzed {analyzed} frame(s)."]
+
+    if label_scores:
+        top_labels = sorted(label_scores.items(), key=lambda x: x[1], reverse=True)[:10]
+        lines.append("**Top labels:** " + ", ".join(f"{l} ({s:.2f})" for l, s in top_labels))
+
+    if seen_text:
+        text_preview = list(sorted(seen_text))[:20]
+        lines.append("**Text spotted:**\n" + "\n".join(f"- {t}" for t in text_preview))
+
+    lines.append(f"**Max faces in frame:** {max_faces}")
+    lines.append(f"**Frames with human pose detected:** {body_pose_frames}")
+
+    if barcode_hits:
+        lines.append("**Barcodes/QR:**\n" + "\n".join(f"- {b}" for b in sorted(barcode_hits)[:12]))
+
+    return "\n\n".join(lines)
+
+
+def extract_macos_metadata(filepath):
+    """Extract Spotlight metadata via mdls (macOS only)."""
+    if sys.platform != 'darwin' or not _is_enabled("FAR_USE_MACOS_METADATA", "1"):
+        return ""
+    if shutil.which('mdls') is None:
+        return ""
+
+    keys = [
+        'kMDItemKind', 'kMDItemContentType', 'kMDItemFSSize',
+        'kMDItemFSCreationDate', 'kMDItemFSContentChangeDate',
+        'kMDItemTitle', 'kMDItemAuthors', 'kMDItemWhereFroms',
+        'kMDItemPixelWidth', 'kMDItemPixelHeight', 'kMDItemDurationSeconds',
+        'kMDItemAudioSampleRate', 'kMDItemCodecs', 'kMDItemGPSLatitude', 'kMDItemGPSLongitude'
+    ]
+
+    cmd = ['mdls']
+    for k in keys:
+        cmd.extend(['-name', k])
+    cmd.append(filepath)
+
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=8)
+        if r.returncode != 0 or not r.stdout.strip():
+            return ""
+
+        rows = []
+        for raw in r.stdout.splitlines():
+            line = raw.strip()
+            if '=' not in line or not line.startswith('kMDItem'):
+                continue
+            k, v = line.split('=', 1)
+            key = k.strip()
+            val = v.strip()
+            if val in ('(null)', '"(null)"', '""'):
+                continue
+            rows.append(f"- **{key}**: {val}")
+
+        if not rows:
+            return ""
+        return "## macOS Spotlight Metadata\n" + "\n".join(rows)
+    except Exception:
+        return ""
 
 
 # --- Local Extractors ---
@@ -659,6 +930,10 @@ def extract_media_metadata(filepath, mime_type):
                                 pass
                         if ocr_texts:
                             parts.append("## Video Frame OCR (Option A)\n" + "\n...\n".join(ocr_texts))
+
+                        apple_video_summary = summarize_apple_vision_frames(frames)
+                        if apple_video_summary:
+                            parts.append(apple_video_summary)
                     
                     # Option C: Vision API
                     if mode in ["C", "D"]:
@@ -1017,6 +1292,13 @@ def generate_file_meta(filepath, root_dir, ignore_patterns, force=False):
         except: extracted_text = "[Read Error]"
     else:
         extracted_text = f"[Binary: {mime_type}]"
+
+    macos_meta = extract_macos_metadata(filepath)
+    if macos_meta:
+        if extracted_text.strip():
+            extracted_text = f"{extracted_text}\n\n{macos_meta}"
+        else:
+            extracted_text = macos_meta
 
     duration = (datetime.datetime.now() - start_time).total_seconds()
     log(f"Done: {filepath} (Time: {duration:.2f}s)")
