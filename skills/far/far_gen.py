@@ -1331,11 +1331,14 @@ extract:
     return meta_path
 
 def generate_dir_meta(dirpath, root_dir, ignore_patterns, files_in_dir):
-    if should_ignore(dirpath, root_dir, ignore_patterns): return
+    if should_ignore(dirpath, root_dir, ignore_patterns):
+        return
 
     meta_path = os.path.join(dirpath, ".dir.meta")
-    timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    
+
+    # Deterministic ordering avoids churn between runs/platforms
+    files_in_dir = sorted(files_in_dir, key=lambda x: x[0])
+
     summary_lines = []
     summary_lines.append(f"# Directory: {os.path.basename(dirpath)}")
     summary_lines.append(f"Contains {len(files_in_dir)} files processed by FAR.\n")
@@ -1357,19 +1360,39 @@ def generate_dir_meta(dirpath, root_dir, ignore_patterns, files_in_dir):
                     if lines and lines[0].startswith('# '):
                         body = "\n".join(lines[1:]).strip()
                     clean_body = " ".join(body.split())[:150]
-                    if clean_body: snippet = clean_body + "..."
-        except: pass
+                    if clean_body:
+                        snippet = clean_body + "..."
+        except Exception:
+            pass
         
         summary_lines.append(f"- **{file}**: {snippet}")
         count += 1
 
-    meta_content = f"""--far_version: 1
+    body_content = "\n".join(summary_lines)
+
+    # Skip rewrite if summary body unchanged and pipeline unchanged.
+    # This prevents noisy .dir.meta timestamp churn in scheduled runs.
+    if os.path.exists(meta_path):
+        try:
+            with open(meta_path, 'r', encoding='utf-8') as f:
+                existing = f.read()
+            existing_parts = existing.split('\n---\n', 1)
+            existing_body = existing_parts[1].strip() if len(existing_parts) == 2 else existing.strip()
+            if existing_body == body_content.strip() and f"pipeline: {PIPELINE_ID}" in existing:
+                log(f"Skip dir.meta unchanged: {meta_path}", "DEBUG")
+                return
+        except Exception:
+            pass
+
+    timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    meta_content = f"""---
+far_version: 1
 type: directory
 extract:
   pipeline: {PIPELINE_ID}
   extracted_at: {timestamp}
 ---
-{chr(10).join(summary_lines)}
+{body_content}
 """
     with open(meta_path, 'w', encoding='utf-8') as f:
         f.write(meta_content)
@@ -1402,21 +1425,24 @@ def main():
 
         processed_files = []
         
+        files_sorted = sorted(files)
+
         # --- Cleanup orphaned .meta files ---
-        for file in files:
+        for file in files_sorted:
             if file.endswith('.meta') and file != '.dir.meta':
                 original_file = file[:-5]
-                if original_file not in files:
+                if original_file not in files_sorted:
                     orphan_path = os.path.join(root, file)
                     try:
                         os.remove(orphan_path)
                         log(f"Cleaned up orphaned meta: {orphan_path}")
-                    except Exception as e:
+                    except Exception:
                         pass
         # ------------------------------------
 
-        for file in files:
-            if file.endswith('.meta') or file.startswith('.'): continue
+        for file in files_sorted:
+            if file.endswith('.meta') or file.startswith('.'):
+                continue
             
             file_path = os.path.join(root, file)
             meta_path = generate_file_meta(file_path, target_path, ignore_patterns, force=args.force)

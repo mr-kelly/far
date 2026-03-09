@@ -3,6 +3,7 @@ import os
 import shutil
 import tempfile
 import sys
+import time
 from pathlib import Path
 
 # Add the skill directory to path to import far_gen
@@ -95,23 +96,52 @@ class TestFarGen(unittest.TestCase):
         f2 = os.path.join(self.test_dir, "b.txt")
         with open(f1, "w") as f: f.write("Content A")
         with open(f2, "w") as f: f.write("Content B")
-        
+
         # Process files manually first (simulating main loop)
         m1 = self.far_gen.generate_file_meta(f1, self.test_dir, [])
         m2 = self.far_gen.generate_file_meta(f2, self.test_dir, [])
-        
+
         files_in_dir = [("a.txt", m1), ("b.txt", m2)]
-        
+
         self.far_gen.generate_dir_meta(self.test_dir, self.test_dir, [], files_in_dir)
-        
+
         dir_meta = os.path.join(self.test_dir, ".dir.meta")
         self.assertTrue(os.path.exists(dir_meta))
-        
+
         with open(dir_meta, "r") as f:
             content = f.read()
             self.assertIn("Content A", content)
             self.assertIn("Content B", content)
             self.assertIn("type: directory", content)
+
+    def test_dir_meta_unchanged_no_rewrite(self):
+        """If directory summary has no content change, .dir.meta should not be rewritten."""
+        f1 = os.path.join(self.test_dir, "a.txt")
+        with open(f1, "w") as f:
+            f.write("Stable content")
+
+        m1 = self.far_gen.generate_file_meta(f1, self.test_dir, [])
+        files_in_dir = [("a.txt", m1)]
+
+        self.far_gen.generate_dir_meta(self.test_dir, self.test_dir, [], files_in_dir)
+        dir_meta = os.path.join(self.test_dir, ".dir.meta")
+
+        with open(dir_meta, "r") as f:
+            first_content = f.read()
+        first_mtime = os.path.getmtime(dir_meta)
+
+        # Ensure mtime granularity won't hide rewrites
+        time.sleep(1.1)
+
+        # Re-generate with unchanged inputs
+        self.far_gen.generate_dir_meta(self.test_dir, self.test_dir, [], files_in_dir)
+
+        with open(dir_meta, "r") as f:
+            second_content = f.read()
+        second_mtime = os.path.getmtime(dir_meta)
+
+        self.assertEqual(first_content, second_content)
+        self.assertEqual(first_mtime, second_mtime)
 
 if __name__ == '__main__':
     unittest.main()

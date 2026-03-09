@@ -67,6 +67,8 @@ FAR is designed for speed. It uses a **two-layer caching mechanism**:
 1.  **Fast Check (mtime & size)**: If the file hasn't been modified, it skips processing instantly (0.003s).
 2.  **Content Check (SHA256)**: If mtime changed, it calculates the file hash. If the content is identical, it updates the timestamp but skips re-extraction.
 
+For directory summaries, FAR also avoids noisy rewrites: if `.dir.meta` summary content is unchanged, it keeps the file untouched (no `extracted_at` churn).
+
 ### 3. Directory Summaries (`.dir.meta`)
 FAR generates a `.dir.meta` file in every directory, providing a high-level summary of all files within. This allows agents to "browse" a folder and understand its contents without reading every single file.
 

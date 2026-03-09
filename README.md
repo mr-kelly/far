@@ -153,6 +153,8 @@ Two-layer cache for instant incremental builds:
 
 Only files whose content has actually changed are re-extracted. The rest are instant cache hits.
 
+`.dir.meta` is also content-stable: if directory summary content hasn't changed, FAR will not rewrite it (so `extract.extracted_at` won't churn on every scheduled run).
+
 ### 📁 Directory Summaries
 
 Auto-generated `.dir.meta` files let agents "browse" entire directories without reading every file:
